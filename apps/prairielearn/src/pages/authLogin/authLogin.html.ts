@@ -149,6 +149,20 @@ export function AuthLogin({ institutionAuthnProviders, service, resLocals }: Aut
                       </a>
                     `
                   : null}
+                <!-- @russfeld start -->
+                ${config.hasCas
+                  ? html`
+                      <a
+                        class="btn btn-primary w-100 position-relative"
+                        href="/pl/caslogin"
+                        role="button"
+                      >
+                        <span class="social-icon"></span>
+                        <span class="font-weight-bold">Sign in with CAS</span>
+                      </a>
+                    `
+                  : null}
+                <!-- @russfeld end -->
                 ${config.hasAzure && isEnterprise()
                   ? html`
                       <a

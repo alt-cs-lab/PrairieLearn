@@ -47,6 +47,11 @@ router.get(
             case 'Shibboleth':
               url = '/pl/shibcallback';
               break;
+            // @russfeld start
+            case 'CAS':
+              url = '/pl/caslogin';
+              break;
+            // @russfeld end
             default:
               return null;
           }

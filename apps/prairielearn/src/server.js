@@ -451,6 +451,10 @@ module.exports.initExpress = function () {
   app.use('/pl/oauth2login', require('./pages/authLoginOAuth2/authLoginOAuth2'));
   app.use('/pl/oauth2callback', require('./pages/authCallbackOAuth2/authCallbackOAuth2'));
   app.use(/\/pl\/shibcallback/, require('./pages/authCallbackShib/authCallbackShib'));
+  // @russfeld start
+  app.use('/pl/caslogin', require('./pages/authLoginCas/authLoginCas'));
+  app.use('/pl/cascallback', require('./pages/authCallbackCas/authCallbackCas'));
+  // @russfeld end
 
   if (isEnterprise()) {
     if (config.hasAzure) {

@@ -261,6 +261,16 @@ const ConfigSchema = z.object({
   googleClientId: z.string().nullable().default(null),
   googleClientSecret: z.string().nullable().default(null),
   googleRedirectUrl: z.string().nullable().default(null),
+  /**
+   * @russfeld start
+   * CAS Authentication
+   */
+  hasCas: z.boolean().default(false),
+  casUrl: z.string().nullable().default('https://casserver.herokuapp.com/cas'),
+  casServiceUrl: z.string().nullable().default('http://localhost:3000/pl/cascallback'),
+  /**
+   * @russfeld end
+   */
   syncExamIdAccessRules: z.boolean().default(false),
   ptHost: z.string().default('http://localhost:4000'),
   checkAccessRulesExamUuid: z.boolean().default(false),
