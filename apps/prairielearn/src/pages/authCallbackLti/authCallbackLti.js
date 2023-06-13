@@ -105,7 +105,12 @@ router.post('/', function (req, res, next) {
 
       // @russfeld start
       // Use Canvas login id
-      var authUid = parameters.custom_canvas_user_login_id;
+      var authUid =
+        parameters.custom_canvas_user_login_id +
+        '@' +
+        parameters.context_id +
+        '::ciid=' +
+        ltiresult.course_instance_id;
       // @russfeld end
 
       var fallbackName = 'LTI user';
