@@ -26,6 +26,7 @@ if [[ $? == 4 ]]; then
 fi
 
 # Only locally start postgres if we weren't given a PG_HOST environment variable
+# @BUG this should probably be PGHOST
 if [[ -z "$PG_HOST" ]]; then
   su postgres -c "pg_ctl --silent --log=${PGDATA}/postgresql.log ${ACTION}"
 fi
