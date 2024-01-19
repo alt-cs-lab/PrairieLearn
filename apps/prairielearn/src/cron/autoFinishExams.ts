@@ -1,10 +1,10 @@
 import ERR = require('async-stacktrace');
-import async = require('async');
-import error = require('@prairielearn/error');
+import * as async from 'async';
+import * as error from '@prairielearn/error';
 import { logger } from '@prairielearn/logger';
-import sqldb = require('@prairielearn/postgres');
+import * as sqldb from '@prairielearn/postgres';
 
-import assessment = require('../lib/assessment');
+import * as assessment from '../lib/assessment';
 import { config } from '../lib/config';
 
 /**
@@ -45,13 +45,13 @@ export function run(callback: (err?: Error | null) => void): void {
               logger.error('Error finishing exam', error.addData(err, { examItem }));
             }
             callback(null);
-          }
+          },
         );
       },
       function (err) {
         if (ERR(err, callback)) return;
         callback(null);
-      }
+      },
     );
   });
 }

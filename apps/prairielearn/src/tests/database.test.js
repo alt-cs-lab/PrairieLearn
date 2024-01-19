@@ -1,10 +1,10 @@
 // @ts-check
 const _ = require('lodash');
-const path = require('node:path');
-const { describeDatabase, diffDirectoryAndDatabase } = require('@prairielearn/postgres-tools');
+import * as path from 'node:path';
+import { describeDatabase, diffDirectoryAndDatabase } from '@prairielearn/postgres-tools';
 
-const { REPOSITORY_ROOT_PATH } = require('../lib/paths');
-const helperDb = require('./helperDb');
+import { REPOSITORY_ROOT_PATH } from '../lib/paths';
+import * as helperDb from './helperDb';
 
 // Custom error type so we can display our own message and omit a stacktrace
 function DatabaseError(message) {
@@ -54,13 +54,13 @@ describe('database', function () {
       _.some(data.tables[table].columns, { name: 'deleted_at' });
     const [softDeleteTables, hardDeleteTables] = _.partition(
       _.keys(data.tables),
-      tableHasDeletedAtColumn
+      tableHasDeletedAtColumn,
     );
 
     for (const table of softDeleteTables) {
       for (const constraint of data.tables[table].foreignKeyConstraints) {
         const match = constraint.def.match(
-          /^FOREIGN KEY \((.*)\) REFERENCES (.*)\(.*\) ON UPDATE .* ON DELETE (.*)$/
+          /^FOREIGN KEY \((.*)\) REFERENCES (.*)\(.*\) ON UPDATE .* ON DELETE (.*)$/,
         );
         if (!match) {
           throw new Error(`Failed to match foreign key for ${table}: ${constraint.def}`);
@@ -68,7 +68,7 @@ describe('database', function () {
         const [, keyName, otherTable, deleteAction] = match;
         if (deleteAction === 'CASCADE' && _.includes(hardDeleteTables, otherTable)) {
           throw new Error(
-            `Soft-delete table "${table}" has ON DELETE CASCADE foreign key "${keyName}" to hard-delete table "${otherTable}"`
+            `Soft-delete table "${table}" has ON DELETE CASCADE foreign key "${keyName}" to hard-delete table "${otherTable}"`,
           );
         }
       }

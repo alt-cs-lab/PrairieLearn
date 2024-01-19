@@ -1,18 +1,21 @@
 // @ts-check
-const path = require('path');
+import * as path from 'path';
 const _ = require('lodash');
-const fs = require('fs-extra');
-const async = require('async');
-const jju = require('jju');
-const Ajv = require('ajv').default;
-const betterAjvErrors = require('better-ajv-errors').default;
-const { parseISO, isValid, isAfter, isFuture } = require('date-fns');
-const { chalk } = require('../lib/chalk');
+import * as fs from 'fs-extra';
+import * as async from 'async';
+import * as jju from 'jju';
+import Ajv from 'ajv';
+import betterAjvErrors from 'better-ajv-errors';
+import { parseISO, isValid, isAfter, isFuture } from 'date-fns';
 
-const schemas = require('../schemas');
-const infofile = require('./infofile');
-const jsonLoad = require('../lib/json-load');
-const perf = require('./performance')('course-db');
+import { chalk } from '../lib/chalk';
+import { config } from '../lib/config';
+import * as schemas from '../schemas';
+import * as infofile from './infofile';
+import { validateJSON } from '../lib/json-load';
+import { makePerformance } from './performance';
+
+const perf = makePerformance('course-db');
 
 // We use a single global instance so that schemas aren't recompiled every time they're used
 const ajv = new Ajv({ allErrors: true });
@@ -319,6 +322,8 @@ const FILE_UUID_REGEX =
  * @property {ZoneQuestion[]} questions
  * @property {number} advanceScorePerc
  * @property {number} gradeRateMinutes
+ * @property {string[]} canView
+ * @property {string[]} canSubmit
  */
 
 /**
@@ -356,6 +361,8 @@ const FILE_UUID_REGEX =
  * @property {boolean} studentGroupJoin
  * @property {boolean} studentGroupLeave
  * @property {GroupRole[]} groupRoles
+ * @property {string[]} canView
+ * @property {string[]} canSubmit
  * @property {number} advanceScorePerc
  * @property {number} gradeRateMinutes
  */
@@ -388,7 +395,7 @@ const FILE_UUID_REGEX =
  * @property {any} id
  * @property {string} qid
  * @property {string} uuid
- * @property {"Calculation" | "ShortAnswer" | "MultipleChoice" | "Checkbox" | "File" | "MultipleTrueFalse" | "v3"} type
+ * @property {"Calculation" | "MultipleChoice" | "Checkbox" | "File" | "MultipleTrueFalse" | "v3"} type
  * @property {string} title
  * @property {string} topic
  * @property {string[]} tags
@@ -422,21 +429,17 @@ const FILE_UUID_REGEX =
  * @param {string} courseDir
  * @returns {Promise<CourseData>}
  */
-module.exports.loadFullCourse = async function (courseDir) {
-  const courseInfo = await module.exports.loadCourseInfo(courseDir);
+export async function loadFullCourse(courseDir) {
+  const courseInfo = await loadCourseInfo(courseDir);
   perf.start('loadQuestions');
-  const questions = await module.exports.loadQuestions(courseDir);
+  const questions = await loadQuestions(courseDir);
   perf.end('loadQuestions');
-  const courseInstanceInfos = await module.exports.loadCourseInstances(courseDir);
+  const courseInstanceInfos = await loadCourseInstances(courseDir);
   const courseInstances = /** @type {{ [ciid: string]: CourseInstanceData }} */ ({});
   for (const courseInstanceId in courseInstanceInfos) {
     // TODO: is it really necessary to do all the crazy error checking on `lstat` for the assessments dir?
     // If so, duplicate all that here
-    const assessments = await module.exports.loadAssessments(
-      courseDir,
-      courseInstanceId,
-      questions
-    );
+    const assessments = await loadAssessments(courseDir, courseInstanceId, questions);
     const courseInstance = {
       courseInstance: courseInstanceInfos[courseInstanceId],
       assessments,
@@ -448,7 +451,7 @@ module.exports.loadFullCourse = async function (courseDir) {
     questions,
     courseInstances,
   };
-};
+}
 
 /**
  * @template T
@@ -482,12 +485,12 @@ function writeErrorsAndWarningsForInfoFileIfNeeded(courseId, filePath, infoFile,
  * @param {CourseData} courseData
  * @param {(line?: string) => void} writeLine
  */
-module.exports.writeErrorsAndWarningsForCourseData = function (courseId, courseData, writeLine) {
+export function writeErrorsAndWarningsForCourseData(courseId, courseData, writeLine) {
   writeErrorsAndWarningsForInfoFileIfNeeded(
     courseId,
     'infoCourse.json',
     courseData.course,
-    writeLine
+    writeLine,
   );
   Object.entries(courseData.questions).forEach(([qid, question]) => {
     const questionPath = path.posix.join('questions', qid, 'info.json');
@@ -499,7 +502,7 @@ module.exports.writeErrorsAndWarningsForCourseData = function (courseId, courseD
       courseId,
       courseInstancePath,
       courseInstanceData.courseInstance,
-      writeLine
+      writeLine,
     );
     Object.entries(courseInstanceData.assessments).forEach(([aid, assessment]) => {
       const assessmentPath = path.posix.join(
@@ -507,18 +510,18 @@ module.exports.writeErrorsAndWarningsForCourseData = function (courseId, courseD
         ciid,
         'assessments',
         aid,
-        'infoAssessment.json'
+        'infoAssessment.json',
       );
       writeErrorsAndWarningsForInfoFileIfNeeded(courseId, assessmentPath, assessment, writeLine);
     });
   });
-};
+}
 
 /**
  * @param {CourseData} courseData
  * @returns {boolean}
  */
-module.exports.courseDataHasErrors = function (courseData) {
+export function courseDataHasErrors(courseData) {
   if (infofile.hasErrors(courseData.course)) return true;
   if (Object.values(courseData.questions).some(infofile.hasErrors)) return true;
   if (
@@ -530,13 +533,13 @@ module.exports.courseDataHasErrors = function (courseData) {
     return true;
   }
   return false;
-};
+}
 
 /**
  * @param {CourseData} courseData
  * @returns {boolean}
  */
-module.exports.courseDataHasErrorsOrWarnings = function (courseData) {
+export function courseDataHasErrorsOrWarnings(courseData) {
   if (infofile.hasErrorsOrWarnings(courseData.course)) return true;
   if (Object.values(courseData.questions).some(infofile.hasErrorsOrWarnings)) return true;
   if (
@@ -548,7 +551,7 @@ module.exports.courseDataHasErrorsOrWarnings = function (courseData) {
     return true;
   }
   return false;
-};
+}
 
 /**
  * Loads a JSON file at the path `path.join(coursePath, filePath). The
@@ -562,12 +565,7 @@ module.exports.courseDataHasErrorsOrWarnings = function (courseData) {
  * @param {boolean} [options.tolerateMissing] - Whether or not a missing file constitutes an error
  * @returns {Promise<InfoFile<T> | null>}
  */
-module.exports.loadInfoFile = async function ({
-  coursePath,
-  filePath,
-  schema,
-  tolerateMissing = false,
-}) {
+export async function loadInfoFile({ coursePath, filePath, schema, tolerateMissing = false }) {
   const absolutePath = path.join(coursePath, filePath);
   let contents;
   try {
@@ -680,15 +678,15 @@ module.exports.loadInfoFile = async function ({
     result.uuid = uuid[0];
     return result;
   }
-};
+}
 
 /**
  * @param {string} coursePath
  * @returns {Promise<InfoFile<Course>>}
  */
-module.exports.loadCourseInfo = async function (coursePath) {
+export async function loadCourseInfo(coursePath) {
   /** @type {import('./infofile').InfoFile<Course> | null} */
-  const maybeNullLoadedData = await module.exports.loadInfoFile({
+  const maybeNullLoadedData = await loadInfoFile({
     coursePath,
     filePath: 'infoCourse.json',
     schema: schemas.infoCourse,
@@ -755,7 +753,7 @@ module.exports.loadCourseInfo = async function (coursePath) {
   const assessmentSets = getFieldWithoutDuplicates(
     'assessmentSets',
     'name',
-    DEFAULT_ASSESSMENT_SETS
+    DEFAULT_ASSESSMENT_SETS,
   );
   const tags = getFieldWithoutDuplicates('tags', 'name', DEFAULT_TAGS);
   const topics = getFieldWithoutDuplicates('topics', 'name');
@@ -784,7 +782,7 @@ module.exports.loadCourseInfo = async function (coursePath) {
 
   loadedData.data = course;
   return loadedData;
-};
+}
 
 /**
  * @template {{ uuid: string }} T
@@ -806,7 +804,7 @@ async function loadAndValidateJson({
   tolerateMissing,
 }) {
   const loadedJson = /** @type {InfoFile<T>} */ (
-    await module.exports.loadInfoFile({
+    await loadInfoFile({
       coursePath,
       filePath,
       schema,
@@ -888,7 +886,7 @@ async function loadInfoForDirectory({
           const subInfoFiles = await walk(path.join(relativeDir, dir));
           if (_.isEmpty(subInfoFiles)) {
             infoFiles[path.join(relativeDir, dir)] = infofile.makeError(
-              `Missing JSON file: ${infoFilePath}`
+              `Missing JSON file: ${infoFilePath}`,
             );
           }
           _.assign(infoFiles, subInfoFiles);
@@ -898,7 +896,7 @@ async function loadInfoForDirectory({
           } else if (e.code === 'ENOENT') {
             // Missing directory; record it
             infoFiles[path.join(relativeDir, dir)] = infofile.makeError(
-              `Missing JSON file: ${infoFilePath}`
+              `Missing JSON file: ${infoFilePath}`,
             );
           } else {
             // Some other error, permissions perhaps. Throw to abort sync.
@@ -968,7 +966,7 @@ function checkAllowAccessRoles(rule) {
   if ('role' in rule) {
     if (rule.role !== 'Student') {
       warnings.push(
-        `The entire "allowAccess" rule with "role: ${rule.role}" should be deleted. Instead, course owners can now manage course staff access on the "Staff" page.`
+        `The entire "allowAccess" rule with "role: ${rule.role}" should be deleted. Instead, course owners can now manage course staff access on the "Staff" page.`,
       );
     }
   }
@@ -999,7 +997,7 @@ function checkAllowAccessDates(rule) {
   }
   if (startDate && endDate && isAfter(startDate, endDate)) {
     errors.push(
-      `Invalid allowAccess rule: startDate (${rule.startDate}) must not be after endDate (${rule.endDate})`
+      `Invalid allowAccess rule: startDate (${rule.startDate}) must not be after endDate (${rule.endDate})`,
     );
   }
   let dateInFuture = false;
@@ -1024,9 +1022,18 @@ async function validateQuestion(question) {
     try {
       const schema = schemas[`questionOptions${question.type}`];
       const options = question.options;
-      await jsonLoad.validateJSONAsync(options, schema);
+      validateJSON(options, schema);
     } catch (err) {
       errors.push(err.message);
+    }
+  }
+
+  if (question.externalGradingOptions?.timeout) {
+    if (question.externalGradingOptions.timeout > config.externalGradingMaximumTimeout) {
+      warnings.push(
+        `External grading timeout value of ${question.externalGradingOptions.timeout} seconds exceeds the maximum value and has been limited to ${config.externalGradingMaximumTimeout} seconds.`,
+      );
+      question.externalGradingOptions.timeout = config.externalGradingMaximumTimeout;
     }
   }
 
@@ -1084,6 +1091,11 @@ async function validateAssessment(assessment, questions) {
   const missingQids = new Set();
   /** @type {(qid: string) => void} */
   const checkAndRecordQid = (qid) => {
+    if (qid[0] === '@') {
+      // Question is being imported from another course. We hold off on validating this until
+      // sync time because we need to query the database to verify that the question exists
+      return;
+    }
     if (!(qid in questions)) {
       missingQids.add(qid);
     }
@@ -1099,7 +1111,7 @@ async function validateAssessment(assessment, questions) {
       const autoPoints = zoneQuestion.autoPoints ?? zoneQuestion.points;
       if (!allowRealTimeGrading && Array.isArray(autoPoints) && autoPoints.length > 1) {
         errors.push(
-          `Cannot specify an array of multiple point values for a question if real-time grading is disabled`
+          `Cannot specify an array of multiple point values for a question if real-time grading is disabled`,
         );
       }
       // We'll normalize either single questions or alternative groups
@@ -1115,7 +1127,7 @@ async function validateAssessment(assessment, questions) {
           const autoPoints = alternative.autoPoints ?? alternative.points;
           if (!allowRealTimeGrading && Array.isArray(autoPoints) && autoPoints.length > 1) {
             errors.push(
-              `Cannot specify an array of multiple point values for an alternative if real-time grading is disabled`
+              `Cannot specify an array of multiple point values for an alternative if real-time grading is disabled`,
             );
           }
           return {
@@ -1156,13 +1168,13 @@ async function validateAssessment(assessment, questions) {
             alternative.maxAutoPoints !== undefined)
         ) {
           errors.push(
-            'Cannot specify "points" for a question if "autoPoints", "manualPoints" or "maxAutoPoints" are specified'
+            'Cannot specify "points" for a question if "autoPoints", "manualPoints" or "maxAutoPoints" are specified',
           );
         }
         if (assessment.type === 'Exam') {
           if (alternative.maxPoints !== undefined || alternative.maxAutoPoints !== undefined) {
             errors.push(
-              'Cannot specify "maxPoints" or "maxAutoPoints" for a question in an "Exam" assessment'
+              'Cannot specify "maxPoints" or "maxAutoPoints" for a question in an "Exam" assessment',
             );
           }
 
@@ -1173,7 +1185,7 @@ async function validateAssessment(assessment, questions) {
           const autoPoints = (hasSplitPoints ? alternative.autoPoints : alternative.points) ?? 0;
           const pointsList = Array.isArray(autoPoints) ? autoPoints : [autoPoints];
           const isNonIncreasing = pointsList.every(
-            (points, index) => index === 0 || points <= pointsList[index - 1]
+            (points, index) => index === 0 || points <= pointsList[index - 1],
           );
           if (!isNonIncreasing) {
             errors.push('Points for a question must be non-increasing');
@@ -1187,12 +1199,12 @@ async function validateAssessment(assessment, questions) {
               alternative.maxAutoPoints !== undefined)
           ) {
             errors.push(
-              'Cannot specify "maxPoints" for a question if "autoPoints", "manualPoints" or "maxAutoPoints" are specified'
+              'Cannot specify "maxPoints" for a question if "autoPoints", "manualPoints" or "maxAutoPoints" are specified',
             );
           }
           if (Array.isArray(alternative.autoPoints ?? alternative.points)) {
             errors.push(
-              'Cannot specify "points" or "autoPoints" as a list for a question in a "Homework" assessment'
+              'Cannot specify "points" or "autoPoints" as a list for a question in a "Homework" assessment',
             );
           }
         }
@@ -1202,39 +1214,15 @@ async function validateAssessment(assessment, questions) {
 
   if (duplicateQids.size > 0) {
     errors.push(
-      `The following questions are used more than once: ${[...duplicateQids].join(', ')}`
+      `The following questions are used more than once: ${[...duplicateQids].join(', ')}`,
     );
   }
 
   if (missingQids.size > 0) {
     errors.push(
-      `The following questions do not exist in this course: ${[...missingQids].join(', ')}`
+      `The following questions do not exist in this course: ${[...missingQids].join(', ')}`,
     );
   }
-
-  const validRoleNames = new Set();
-  assessment.groupRoles?.forEach((role) => {
-    validRoleNames.add(role.name);
-  });
-
-  (assessment.zones || []).forEach((zone) => {
-    (zone.questions || []).forEach((zoneQuestion) => {
-      (zoneQuestion.canView || []).forEach((roleName) => {
-        if (!validRoleNames.has(roleName)) {
-          errors.push(
-            `A zone question's "canView" permission contains the non-existent group role name "${roleName}".`
-          );
-        }
-      });
-      (zoneQuestion.canSubmit || []).forEach((roleName) => {
-        if (!validRoleNames.has(roleName)) {
-          errors.push(
-            `A zone question's "canSubmit" permission contains the non-existent group role name "${roleName}".`
-          );
-        }
-      });
-    });
-  });
 
   if (assessment.groupRoles) {
     // Ensure at least one role can assign roles before and during an assessment
@@ -1252,12 +1240,12 @@ async function validateAssessment(assessment, questions) {
 
     if (!foundCanAssignRolesAtStart) {
       errors.push(
-        'Could not find a role with minimum >= 1 and "can_assign_roles_at_start" set to "true".'
+        'Could not find a role with minimum >= 1 and "can_assign_roles_at_start" set to "true".',
       );
     }
     if (!foundCanAssignRolesDuringAssessment) {
       errors.push(
-        'Could not find a role with minimum >= 1 and "can_assign_roles_during_assessment" set to "true".'
+        'Could not find a role with minimum >= 1 and "can_assign_roles_during_assessment" set to "true".',
       );
     }
 
@@ -1265,24 +1253,63 @@ async function validateAssessment(assessment, questions) {
     assessment.groupRoles.forEach((role) => {
       if (role.minimum > assessment.groupMinSize) {
         warnings.push(
-          `Group role "${role.name}" has a minimum greater than the group's minimum size.`
+          `Group role "${role.name}" has a minimum greater than the group's minimum size.`,
         );
       }
       if (role.minimum && role.minimum > assessment.groupMaxSize) {
         errors.push(
-          `Group role "${role.name}" contains an invalid minimum. (Expected at most ${assessment.groupMaxSize}, found ${role.minimum}).`
+          `Group role "${role.name}" contains an invalid minimum. (Expected at most ${assessment.groupMaxSize}, found ${role.minimum}).`,
         );
       }
       if (role.maximum && role.maximum > assessment.groupMaxSize) {
         errors.push(
-          `Group role "${role.name}" contains an invalid maximum. (Expected at most ${assessment.groupMaxSize}, found ${role.maximum}).`
+          `Group role "${role.name}" contains an invalid maximum. (Expected at most ${assessment.groupMaxSize}, found ${role.maximum}).`,
         );
       }
       if (role.minimum > role.maximum) {
         errors.push(
-          `Group role "${role.name}" must have a minimum <= maximum. (Expected minimum <= ${role.maximum}, found minimum = ${role.minimum}).`
+          `Group role "${role.name}" must have a minimum <= maximum. (Expected minimum <= ${role.maximum}, found minimum = ${role.minimum}).`,
         );
       }
+    });
+
+    const validRoleNames = new Set();
+    assessment.groupRoles?.forEach((role) => {
+      validRoleNames.add(role.name);
+    });
+
+    /** @type {(canView: string[], canSubmit: string[], area: string) => void} */
+    const validateViewAndSubmitRolePermissions = (canView, canSubmit, area) => {
+      (canView || []).forEach((roleName) => {
+        if (!validRoleNames.has(roleName)) {
+          errors.push(
+            `The ${area}'s "canView" permission contains the non-existent group role name "${roleName}".`,
+          );
+        }
+      });
+      (canSubmit || []).forEach((roleName) => {
+        if (!validRoleNames.has(roleName)) {
+          errors.push(
+            `The ${area}'s "canSubmit" permission contains the non-existent group role name "${roleName}".`,
+          );
+        }
+      });
+    };
+
+    // Validate role names at the assessment level
+    validateViewAndSubmitRolePermissions(assessment.canView, assessment.canSubmit, 'assessment');
+
+    // Validate role names for each zone
+    (assessment.zones || []).forEach((zone) => {
+      validateViewAndSubmitRolePermissions(zone.canView, zone.canSubmit, 'zone');
+      // Validate role names for each question
+      (zone.questions || []).forEach((zoneQuestion) => {
+        validateViewAndSubmitRolePermissions(
+          zoneQuestion.canView,
+          zoneQuestion.canSubmit,
+          'zone question',
+        );
+      });
     });
   }
 
@@ -1302,7 +1329,7 @@ async function validateCourseInstance(courseInstance) {
       warnings.push('"allowIssueReporting" is no longer needed.');
     } else {
       errors.push(
-        '"allowIssueReporting" is no longer permitted in "infoCourseInstance.json". Instead, set "allowIssueReporting" in "infoAssessment.json" files.'
+        '"allowIssueReporting" is no longer permitted in "infoCourseInstance.json". Instead, set "allowIssueReporting" in "infoAssessment.json" files.',
       );
     }
   }
@@ -1326,7 +1353,7 @@ async function validateCourseInstance(courseInstance) {
 
     if (_(courseInstance).has('userRoles')) {
       warnings.push(
-        'The property "userRoles" should be deleted. Instead, course owners can now manage staff access on the "Staff" page.'
+        'The property "userRoles" should be deleted. Instead, course owners can now manage staff access on the "Staff" page.',
       );
     }
   }
@@ -1339,7 +1366,7 @@ async function validateCourseInstance(courseInstance) {
  *
  * @param {string} coursePath
  */
-module.exports.loadQuestions = async function (coursePath) {
+export async function loadQuestions(coursePath) {
   /** @type {{ [qid: string]: InfoFile<Question> }} */
   const questions = await loadInfoForDirectory({
     coursePath,
@@ -1350,8 +1377,8 @@ module.exports.loadQuestions = async function (coursePath) {
     validate: validateQuestion,
     recursive: true,
   });
-  // Don't allow questions to start with '@', because it will be used to
-  // reference questions outside the course once question sharing is implemented.
+  // Don't allow question directories to start with '@', because it is
+  // used to import questions from other courses.
   for (let qid in questions) {
     if (qid[0] === '@') {
       infofile.addError(questions[qid], `Question IDs are not allowed to begin with '@'`);
@@ -1359,17 +1386,17 @@ module.exports.loadQuestions = async function (coursePath) {
   }
   checkDuplicateUUIDs(
     questions,
-    (uuid, ids) => `UUID "${uuid}" is used in other questions: ${ids.join(', ')}`
+    (uuid, ids) => `UUID "${uuid}" is used in other questions: ${ids.join(', ')}`,
   );
   return questions;
-};
+}
 
 /**
  * Loads all course instances in a course directory.
  *
  * @param {string} coursePath
  */
-module.exports.loadCourseInstances = async function (coursePath) {
+export async function loadCourseInstances(coursePath) {
   /** @type {{ [ciid: string]: InfoFile<CourseInstance> }} */
   const courseInstances = await loadInfoForDirectory({
     coursePath,
@@ -1382,10 +1409,10 @@ module.exports.loadCourseInstances = async function (coursePath) {
   });
   checkDuplicateUUIDs(
     courseInstances,
-    (uuid, ids) => `UUID "${uuid}" is used in other course instances: ${ids.join(', ')}`
+    (uuid, ids) => `UUID "${uuid}" is used in other course instances: ${ids.join(', ')}`,
   );
   return courseInstances;
-};
+}
 
 /**
  * Loads all assessments in a course instance.
@@ -1394,7 +1421,7 @@ module.exports.loadCourseInstances = async function (coursePath) {
  * @param {string} courseInstance
  * @param {{ [qid: string]: any }} questions
  */
-module.exports.loadAssessments = async function (coursePath, courseInstance, questions) {
+export async function loadAssessments(coursePath, courseInstance, questions) {
   const assessmentsPath = path.join('courseInstances', courseInstance, 'assessments');
   /** @type {(assessment: Assessment) => Promise<{ warnings: string[], errors: string[] }>} */
   const validateAssessmentWithQuestions = (assessment) => validateAssessment(assessment, questions);
@@ -1411,7 +1438,7 @@ module.exports.loadAssessments = async function (coursePath, courseInstance, que
   checkDuplicateUUIDs(
     assessments,
     (uuid, ids) =>
-      `UUID "${uuid}" is used in other assessments in this course instance: ${ids.join(', ')}`
+      `UUID "${uuid}" is used in other assessments in this course instance: ${ids.join(', ')}`,
   );
   return assessments;
-};
+}

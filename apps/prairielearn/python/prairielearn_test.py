@@ -1,8 +1,9 @@
+import itertools as it
 import json
 import math
 import string
 from enum import Enum
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, cast
 
 import lxml.html
 import networkx as nx
@@ -24,7 +25,7 @@ def test_encoding_pandas(df: pd.DataFrame) -> None:
     json_df = pl.to_json(df, df_encoding_version=2)
     json_str = json.dumps(json_df)
 
-    assert type(json_str) == str
+    assert isinstance(json_str, str)
 
     # Deserialize and check equality
     loaded_str = json.loads(json_str)
@@ -70,7 +71,7 @@ def test_networkx_serialization(networkx_graph: Any) -> None:
     json_object = json.dumps(pl.to_json(networkx_graph), allow_nan=False)
     decoded_json_object = pl.from_json(json.loads(json_object))
 
-    assert type(networkx_graph) == type(decoded_json_object)
+    assert type(networkx_graph) == type(decoded_json_object)  # noqa: E721
 
     assert nx.utils.nodes_equal(networkx_graph.nodes(), decoded_json_object.nodes())
     assert nx.utils.edges_equal(networkx_graph.edges(), decoded_json_object.edges())
@@ -156,7 +157,7 @@ def test_numpy_serialization(numpy_object: Any) -> None:
     )
     decoded_json_object = pl.from_json(json.loads(json_object))
 
-    assert type(numpy_object) == type(decoded_json_object)
+    assert type(numpy_object) == type(decoded_json_object)  # noqa: E721
     np.testing.assert_array_equal(numpy_object, decoded_json_object, strict=True)
 
 
@@ -246,7 +247,7 @@ def test_grade_answer_parametrized_correct(
     good_feedback = "you did good"
     bad_feedback = "that's terrible"
 
-    def grading_function(submitted_answer: str) -> tuple[bool, Optional[str]]:
+    def grading_function(submitted_answer: str) -> tuple[bool, str | None]:
         if submitted_answer in {"a", "b", "c", "d", "<>"}:
             return True, good_feedback
         return False, bad_feedback
@@ -257,7 +258,7 @@ def test_grade_answer_parametrized_correct(
 
     expected_score = 1.0 if expected_grade else 0.0
     assert question_data["partial_scores"][question_name]["score"] == expected_score
-    assert type(question_data["partial_scores"][question_name]["score"]) == float
+    assert isinstance(question_data["partial_scores"][question_name]["score"], float)
 
     assert "weight" in question_data["partial_scores"][question_name]
     assert question_data["partial_scores"][question_name].get("weight") == weight
@@ -291,7 +292,7 @@ def test_grade_answer_parametrized_key_error_blank(
 
     question_data["submitted_answers"] = {question_name: "True"}
 
-    def grading_function(_: str) -> tuple[bool, Optional[str]]:
+    def grading_function(_: str) -> tuple[bool, str | None]:
         decoy_dict: dict[str, str] = dict()
         decoy_dict["junk"]  # This is to throw a key error
         return (True, None)
@@ -304,7 +305,7 @@ def test_grade_answer_parametrized_key_error_blank(
     question_data["format_errors"] = dict()
     pl.grade_answer_parameterized(question_data, question_name, grading_function)
 
-    assert question_data["format_errors"][question_name] == "No answer was submitted"
+    assert question_data["partial_scores"][question_name]["score"] == 0.0
 
 
 @pytest.mark.repeat(100)
@@ -325,3 +326,23 @@ def test_get_uuid() -> None:
 
     # Assert that the first character is a valid hex letter.
     assert pl_uuid[0] in set("abcdef")
+
+
+@pytest.mark.parametrize(
+    "length, expected_output",
+    [
+        (1, ["a"]),
+        (2, ["a", "b"]),
+        (4, ["a", "b", "c", "d"]),
+    ],
+)
+def test_iter_keys(length: int, expected_output: list[str]) -> None:
+    assert list(it.islice(pl.iter_keys(), length)) == expected_output
+
+
+@pytest.mark.parametrize(
+    "idx, expected_output",
+    [(0, "a"), (1, "b"), (3, "d"), (26, "aa"), (27, "ab")],
+)
+def test_index2key(idx: int, expected_output: str) -> None:
+    assert pl.index2key(idx) == expected_output

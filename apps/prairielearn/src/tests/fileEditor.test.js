@@ -1,23 +1,25 @@
+// @ts-check
 const ERR = require('async-stacktrace');
 const request = require('request');
-const assert = require('chai').assert;
-const fs = require('fs-extra');
-const path = require('path');
-const async = require('async');
-const ncp = require('ncp');
-const cheerio = require('cheerio');
-const tmp = require('tmp');
-const fetch = require('node-fetch').default;
+import { assert } from 'chai';
+import { readFileSync } from 'node:fs';
+import * as fs from 'fs-extra';
+import * as path from 'path';
+import * as async from 'async';
+import * as cheerio from 'cheerio';
+import * as tmp from 'tmp';
+import fetch from 'node-fetch';
 const FormData = require('form-data');
 
-const { config } = require('../lib/config');
-const sqldb = require('@prairielearn/postgres');
+import { config } from '../lib/config';
+import * as sqldb from '@prairielearn/postgres';
+import * as helperServer from './helperServer';
+import { exec } from 'child_process';
+import * as b64Util from '../lib/base64-util';
+import { encodePath } from '../lib/uri-util';
+import { EXAMPLE_COURSE_PATH } from '../lib/paths';
+
 const sql = sqldb.loadSqlEquiv(__filename);
-const helperServer = require('./helperServer');
-const { exec } = require('child_process');
-const b64Util = require('../lib/base64-util');
-const { encodePath } = require('../lib/uri-util');
-const { EXAMPLE_COURSE_PATH } = require('../lib/paths');
 
 const locals = {};
 let page, elemList;
@@ -43,58 +45,58 @@ const questionHtmlPath = path.join(questionPath, 'question.html');
 const questionPythonPath = path.join(questionPath, 'server.py');
 
 const infoCourseJsonA = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoCoursePath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoCoursePath), 'utf-8'),
 );
 let infoCourseJsonB = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoCoursePath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoCoursePath), 'utf-8'),
 );
 infoCourseJsonB.title = 'Test Course (Renamed)';
 let infoCourseJsonC = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoCoursePath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoCoursePath), 'utf-8'),
 );
 infoCourseJsonC.title = 'Test Course (Renamed Yet Again)';
 
 const infoCourseInstanceJsonA = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoCourseInstancePath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoCourseInstancePath), 'utf-8'),
 );
 let infoCourseInstanceJsonB = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoCourseInstancePath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoCourseInstancePath), 'utf-8'),
 );
 infoCourseInstanceJsonB.longName = 'Fall 2019';
 let infoCourseInstanceJsonC = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoCourseInstancePath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoCourseInstancePath), 'utf-8'),
 );
 infoCourseInstanceJsonC.longName = 'Spring 2020';
 
 const infoAssessmentJsonA = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoAssessmentPath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoAssessmentPath), 'utf-8'),
 );
 let infoAssessmentJsonB = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoAssessmentPath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoAssessmentPath), 'utf-8'),
 );
 infoAssessmentJsonB.title = 'Homework for file editor test (Renamed)';
 let infoAssessmentJsonC = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, infoAssessmentPath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, infoAssessmentPath), 'utf-8'),
 );
-infoAssessmentJsonC.title = 'Homework for file editor test (Renamed Yet Aagain)';
+infoAssessmentJsonC.title = 'Homework for file editor test (Renamed Yet Again)';
 
 const questionJsonA = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, questionJsonPath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, questionJsonPath), 'utf-8'),
 );
 let questionJsonB = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, questionJsonPath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, questionJsonPath), 'utf-8'),
 );
 questionJsonB.title = 'Test question (Renamed)';
 let questionJsonC = JSON.parse(
-  fs.readFileSync(path.join(courseTemplateDir, questionJsonPath), 'utf-8')
+  readFileSync(path.join(courseTemplateDir, questionJsonPath), 'utf-8'),
 );
 questionJsonC.title = 'Test question (Renamed Yet Again)';
 
-const questionHtmlA = fs.readFileSync(path.join(courseTemplateDir, questionHtmlPath), 'utf-8');
+const questionHtmlA = readFileSync(path.join(courseTemplateDir, questionHtmlPath), 'utf-8');
 const questionHtmlB = questionHtmlA + '\nAnother line of text.\n\n';
 const questionHtmlC = questionHtmlB + '\nYet another line of text.\n\n';
 
-const questionPythonA = fs.readFileSync(path.join(courseTemplateDir, questionPythonPath), 'utf-8');
+const questionPythonA = readFileSync(path.join(courseTemplateDir, questionPythonPath), 'utf-8');
 const questionPythonB = questionPythonA + '\n# Comment.\n\n';
 const questionPythonC = questionPythonB + '\n# Another comment.\n\n';
 
@@ -113,7 +115,7 @@ const courseInstanceInstanceAdminSettingsUrl = courseInstanceInstanceAdminUrl + 
 const courseInstanceInstanceAdminEditUrl =
   courseInstanceInstanceAdminUrl + `/file_edit/${encodePath(infoCourseInstancePath)}`;
 const assessmentUrl = courseInstanceUrl + '/assessment/1';
-const assesmentSettingsUrl = assessmentUrl + '/settings';
+const assessmentSettingsUrl = assessmentUrl + '/settings';
 const assessmentEditUrl = assessmentUrl + `/file_edit/${encodePath(infoAssessmentPath)}`;
 const courseInstanceQuestionUrl = courseInstanceUrl + '/question/1';
 const courseInstanceQuestionSettingsUrl = courseInstanceQuestionUrl + '/settings';
@@ -130,7 +132,7 @@ const findEditUrlData = [
   {
     name: 'assessment',
     selector: 'a:contains("infoAssessment.json") + a:contains("Edit")',
-    url: assesmentSettingsUrl,
+    url: assessmentSettingsUrl,
     expectedEditUrl: assessmentEditUrl,
   },
   {
@@ -367,7 +369,7 @@ function badPost(action, fileEditContents, url) {
             return callback(new Error('bad status: ' + response.statusCode + '\n' + body));
           }
           callback(null);
-        }
+        },
       );
     });
   });
@@ -387,10 +389,16 @@ function createCourseFiles(callback) {
           cwd: '.',
           env: process.env,
         };
-        exec(`git init --bare ${courseOriginDir}`, execOptions, (err) => {
-          if (ERR(err, callback)) return;
-          callback(null);
-        });
+        // Ensure that the default branch is master, regardless of how git
+        // is configured on the host machine.
+        exec(
+          `git -c "init.defaultBranch=master" init --bare ${courseOriginDir}`,
+          execOptions,
+          (err) => {
+            if (ERR(err, callback)) return;
+            callback(null);
+          },
+        );
       },
       (callback) => {
         const execOptions = {
@@ -402,11 +410,8 @@ function createCourseFiles(callback) {
           callback(null);
         });
       },
-      (callback) => {
-        ncp(courseTemplateDir, courseLiveDir, { clobber: false }, (err) => {
-          if (ERR(err, callback)) return;
-          callback(null);
-        });
+      async () => {
+        await fs.copy(courseTemplateDir, courseLiveDir, { overwrite: false });
       },
       (callback) => {
         const execOptions = {
@@ -452,7 +457,7 @@ function createCourseFiles(callback) {
     (err) => {
       if (ERR(err, callback)) return;
       callback(null);
-    }
+    },
   );
 }
 
@@ -481,7 +486,7 @@ function deleteCourseFiles(callback) {
     (err) => {
       if (ERR(err, callback)) return;
       callback(null);
-    }
+    },
   );
 }
 
@@ -491,7 +496,7 @@ function editPost(
   url,
   expectedToFindResults,
   expectedToFindChoice,
-  expectedDiskContents
+  expectedDiskContents,
 ) {
   describe(`POST to edit url with action ${action}`, function () {
     it('should load successfully', function (callback) {
@@ -518,7 +523,7 @@ function editPost(
           }
           page = body;
           callback(null);
-        }
+        },
       );
     });
     it('should parse', function () {
@@ -529,7 +534,7 @@ function editPost(
         expectedToFindResults,
         expectedToFindChoice,
         fileEditContents,
-        expectedDiskContents
+        expectedDiskContents,
       );
     }
   });
@@ -572,7 +577,7 @@ function verifyEdit(
   expectedToFindResults,
   expectedToFindChoice,
   expectedDraftContents,
-  expectedDiskContents
+  expectedDiskContents,
 ) {
   it('should have a CSRF token', function () {
     elemList = locals.$('form[name="editor-form"] input[name="__csrf_token"]');
@@ -617,14 +622,12 @@ function verifyEdit(
     assert.isString(locals.file_edit_orig_hash);
   });
   it('should have a script with draft file contents', function (callback) {
-    elemList = locals.$('script');
-    for (let i = 0; i < elemList.length; i++) {
-      let elem = elemList[i];
+    for (const elem of Array.from(locals.$('script'))) {
       if (typeof elem !== 'undefined' && Object.prototype.hasOwnProperty.call(elem, 'children')) {
         if (elem.children.length > 0) {
           if (Object.prototype.hasOwnProperty.call(elem.children[0], 'data')) {
             let match = elem.children[0].data.match(
-              /{[^{]*contents: "([^"]*)"[^{]*elementId: "file-editor-([^"]*)-draft"[^{]*}/ms
+              /{[^{]*contents: "([^"]*)"[^{]*elementId: "file-editor-([^"]*)-draft"[^{]*}/ms,
             );
             if (match != null) {
               locals.fileContents = b64Util.b64DecodeUnicode(match[1]);
@@ -648,14 +651,12 @@ function verifyEdit(
     }
   });
   it(`should have a script with disk file contents - ${expectedToFindChoice}`, function (callback) {
-    elemList = locals.$('script');
-    for (let i = 0; i < elemList.length; i++) {
-      let elem = elemList[i];
+    for (const elem of Array.from(locals.$('script'))) {
       if (typeof elem !== 'undefined' && Object.prototype.hasOwnProperty.call(elem, 'children')) {
         if (elem.children.length > 0) {
           if (Object.prototype.hasOwnProperty.call(elem.children[0], 'data')) {
             let match = elem.children[0].data.match(
-              /{[^{]*contents: "([^"]*)"[^{]*elementId: "file-editor-([^"]*)-disk"[^{]*}/ms
+              /{[^{]*contents: "([^"]*)"[^{]*elementId: "file-editor-([^"]*)-disk"[^{]*}/ms,
             );
             if (match != null) {
               if (expectedToFindChoice) {
@@ -687,7 +688,7 @@ function editGet(
   expectedToFindResults,
   expectedToFindChoice,
   expectedDraftContents,
-  expectedDiskContents
+  expectedDiskContents,
 ) {
   describe(`GET to edit url`, function () {
     it('should load successfully', function (callback) {
@@ -711,7 +712,7 @@ function editGet(
       expectedToFindResults,
       expectedToFindChoice,
       expectedDraftContents,
-      expectedDiskContents
+      expectedDiskContents,
     );
   });
 }
@@ -886,7 +887,7 @@ function pullAndVerifyFileInDev(fileName, fileContents) {
       });
     });
     it('should match contents', function () {
-      assert.strictEqual(fs.readFileSync(path.join(courseDevDir, fileName), 'utf-8'), fileContents);
+      assert.strictEqual(readFileSync(path.join(courseDevDir, fileName), 'utf-8'), fileContents);
     });
   });
 }
@@ -1146,7 +1147,7 @@ function testUploadFile(params) {
       const $ = cheerio.load(elemList[0].attribs['data-content']);
       // __csrf_token
       elemList = $(
-        `form[name="instructor-file-upload-form-${params.id}"] input[name="__csrf_token"]`
+        `form[name="instructor-file-upload-form-${params.id}"] input[name="__csrf_token"]`,
       );
       assert.lengthOf(elemList, 1);
       assert.nestedProperty(elemList[0], 'attribs.value');
@@ -1161,7 +1162,7 @@ function testUploadFile(params) {
         locals.working_path = undefined;
       } else {
         elemList = $(
-          `form[name="instructor-file-upload-form-${params.id}"] input[name="working_path"]`
+          `form[name="instructor-file-upload-form-${params.id}"] input[name="working_path"]`,
         );
         assert.lengthOf(elemList, 1);
         assert.nestedProperty(elemList[0], 'attribs.value');
@@ -1211,7 +1212,7 @@ function testRenameFile(params) {
       const $ = cheerio.load(elemList[0].attribs['data-content']);
       // __csrf_token
       elemList = $(
-        `form[name="instructor-file-rename-form-${params.id}"] input[name="__csrf_token"]`
+        `form[name="instructor-file-rename-form-${params.id}"] input[name="__csrf_token"]`,
       );
       assert.lengthOf(elemList, 1);
       assert.nestedProperty(elemList[0], 'attribs.value');
@@ -1219,14 +1220,14 @@ function testRenameFile(params) {
       assert.isString(locals.__csrf_token);
       // old_file_name
       elemList = $(
-        `form[name="instructor-file-rename-form-${params.id}"] input[name="old_file_name"]`
+        `form[name="instructor-file-rename-form-${params.id}"] input[name="old_file_name"]`,
       );
       assert.lengthOf(elemList, 1);
       assert.nestedProperty(elemList[0], 'attribs.value');
       locals.old_file_name = elemList[0].attribs.value;
       // working_path
       elemList = $(
-        `form[name="instructor-file-rename-form-${params.id}"] input[name="working_path"]`
+        `form[name="instructor-file-rename-form-${params.id}"] input[name="working_path"]`,
       );
       assert.lengthOf(elemList, 1);
       assert.nestedProperty(elemList[0], 'attribs.value');
@@ -1265,7 +1266,7 @@ function testDeleteFile(params) {
       const $ = cheerio.load(elemList[0].attribs['data-content']);
       // __csrf_token
       elemList = $(
-        `form[name="instructor-file-delete-form-${params.id}"] input[name="__csrf_token"]`
+        `form[name="instructor-file-delete-form-${params.id}"] input[name="__csrf_token"]`,
       );
       assert.lengthOf(elemList, 1);
       assert.nestedProperty(elemList[0], 'attribs.value');

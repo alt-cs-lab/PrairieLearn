@@ -1,30 +1,36 @@
+// @ts-check
 const ERR = require('async-stacktrace');
 const asyncHandler = require('express-async-handler');
-const express = require('express');
-const router = express.Router();
-const async = require('async');
-const error = require('@prairielearn/error');
-const question = require('../../lib/question');
-const sqldb = require('@prairielearn/postgres');
-const fs = require('fs-extra');
-const { v4: uuidv4 } = require('uuid');
-const path = require('path');
+import * as express from 'express';
+import * as async from 'async';
+import * as error from '@prairielearn/error';
+import { startTestQuestion } from '../../lib/question-testing';
+import * as sqldb from '@prairielearn/postgres';
+import * as path from 'path';
 const debug = require('debug')('prairielearn:' + path.basename(__filename, '.js'));
-const { logger } = require('@prairielearn/logger');
-const {
-  QuestionRenameEditor,
-  QuestionDeleteEditor,
-  QuestionCopyEditor,
-} = require('../../lib/editors');
-const { config } = require('../../lib/config');
+import { logger } from '@prairielearn/logger';
+import { QuestionRenameEditor, QuestionDeleteEditor, QuestionCopyEditor } from '../../lib/editors';
+import { config } from '../../lib/config';
+import { encodePath } from '../../lib/uri-util';
+import { idsEqual } from '../../lib/id';
+import { generateSignedToken } from '@prairielearn/signed-token';
+import { copyQuestionBetweenCourses } from '../../lib/copy-question';
+import { callbackify } from 'node:util';
+import { flash } from '@prairielearn/flash';
+import { features } from '../../lib/features/index';
+import { getCanonicalHost } from '../../lib/url';
+import { isEnterprise } from '../../lib/license';
+import { selectCoursesWithEditAccess } from '../../models/course';
+
+const router = express.Router();
 const sql = sqldb.loadSqlEquiv(__filename);
-const { encodePath } = require('../../lib/uri-util');
-const { idsEqual } = require('../../lib/id');
-const { generateSignedToken } = require('@prairielearn/signed-token');
 
 router.post(
   '/test',
   asyncHandler(async (req, res) => {
+    if (res.locals.question.course_id !== res.locals.course.id) {
+      throw error.make(403, 'Access denied');
+    }
     // We use a separate `test/` POST route so that we can always use the
     // route to distinguish between pages that need to execute course code
     // (this `test/` handler) and pages that need access to course content
@@ -36,14 +42,14 @@ router.post(
       const count = 1;
       const showDetails = true;
       const assessmentGroupWork = res.locals.assessment ? res.locals.assessment.group_work : false;
-      const jobSequenceId = await question.startTestQuestion(
+      const jobSequenceId = await startTestQuestion(
         count,
         showDetails,
         res.locals.question,
         assessmentGroupWork,
         res.locals.course_instance,
         res.locals.course,
-        res.locals.authn_user.user_id
+        res.locals.authn_user.user_id,
       );
       res.redirect(res.locals.urlPrefix + '/jobSequence/' + jobSequenceId);
     } else if (req.body.__action === 'test_100') {
@@ -56,14 +62,14 @@ router.post(
         const assessmentGroupWork = res.locals.assessment
           ? res.locals.assessment.group_work
           : false;
-        const jobSequenceId = await question.startTestQuestion(
+        const jobSequenceId = await startTestQuestion(
           count,
           showDetails,
           res.locals.question,
           assessmentGroupWork,
           res.locals.course_instance,
           res.locals.course,
-          res.locals.authn_user.user_id
+          res.locals.authn_user.user_id,
         );
         res.redirect(res.locals.urlPrefix + '/jobSequence/' + jobSequenceId);
       } else {
@@ -75,18 +81,21 @@ router.post(
         body: req.body,
       });
     }
-  })
+  }),
 );
 
 router.post('/', function (req, res, next) {
+  if (res.locals.question.course_id !== res.locals.course.id) {
+    return next(error.make(403, 'Access denied'));
+  }
   if (req.body.__action === 'change_id') {
     debug(`Change qid from ${res.locals.question.qid} to ${req.body.id}`);
     if (!req.body.id) return next(new Error(`Invalid QID (was falsy): ${req.body.id}`));
     if (!/^[-A-Za-z0-9_/]+$/.test(req.body.id)) {
       return next(
         new Error(
-          `Invalid QID (was not only letters, numbers, dashes, slashes, and underscores, with no spaces): ${req.body.id}`
-        )
+          `Invalid QID (was not only letters, numbers, dashes, slashes, and underscores, with no spaces): ${req.body.id}`,
+        ),
       );
     }
     let qid_new;
@@ -128,64 +137,38 @@ router.post('/', function (req, res, next) {
             res.redirect(res.locals.urlPrefix + '/edit_error/' + job_sequence_id);
           } else {
             debug(
-              `Get question_id from uuid=${editor.uuid} with course_id=${res.locals.course.id}`
+              `Get question_id from uuid=${editor.uuid} with course_id=${res.locals.course.id}`,
             );
             sqldb.queryOneRow(
               sql.select_question_id_from_uuid,
               { uuid: editor.uuid, course_id: res.locals.course.id },
               (err, result) => {
                 if (ERR(err, next)) return;
-                res.redirect(
-                  res.locals.urlPrefix + '/question/' + result.rows[0].question_id + '/settings'
+                flash(
+                  'success',
+                  'Question copied successfully. You are now viewing your copy of the question.',
                 );
-              }
+                res.redirect(
+                  res.locals.urlPrefix + '/question/' + result.rows[0].question_id + '/settings',
+                );
+              },
             );
           }
         });
       });
     } else {
-      // In this case, we are sending a copy of this question to a different course
-      debug(`send copy of question: to_course_id = ${req.body.to_course_id}`);
-      if (!res.locals.authz_data.has_course_permission_view) {
-        return next(error.make(403, 'Access denied (must be a course Viewer)'));
-      }
-      let params = {
-        from_course_id: res.locals.course.id,
-        to_course_id: req.body.to_course_id,
-        user_id: res.locals.user.user_id,
-        transfer_type: 'CopyQuestion',
-        from_filename: path.join(res.locals.course.path, 'questions', res.locals.question.qid),
-      };
-      async.waterfall(
-        [
-          (callback) => {
-            const f = uuidv4();
-            const relDir = path.join(f.slice(0, 3), f.slice(3, 6));
-            params.storage_filename = path.join(relDir, f.slice(6));
-            if (config.filesRoot == null) return callback(new Error('config.filesRoot is null'));
-            fs.copy(
-              params.from_filename,
-              path.join(config.filesRoot, params.storage_filename),
-              { errorOnExist: true },
-              (err) => {
-                if (ERR(err, callback)) return;
-                callback(null);
-              }
-            );
-          },
-          (callback) => {
-            sqldb.queryOneRow(sql.insert_file_transfer, params, (err, result) => {
-              if (ERR(err, callback)) return;
-              callback(null, result.rows[0]);
-            });
-          },
-        ],
-        (err, results) => {
+      callbackify(copyQuestionBetweenCourses)(
+        res,
+        {
+          fromCourse: res.locals.course,
+          toCourseId: req.body.to_course_id,
+          question: res.locals.question,
+        },
+        (err) => {
           if (ERR(err, next)) return;
-          res.redirect(
-            `${res.locals.plainUrlPrefix}/course/${params.to_course_id}/file_transfer/${results.id}`
-          );
-        }
+          // `copyQuestionBetweenCourses` performs the redirect automatically,
+          // so if there wasn't an error, there's nothing to do here.
+        },
       );
     }
   } else if (req.body.__action === 'delete_question') {
@@ -203,21 +186,74 @@ router.post('/', function (req, res, next) {
         }
       });
     });
+  } else if (req.body.__action === 'sharing_set_add') {
+    debug('Add question to sharing set');
+    features
+      .enabledFromLocals('question-sharing', res.locals)
+      .then((questionSharingEnabled) => {
+        if (!questionSharingEnabled) {
+          return next(error.make(403, 'Access denied (feature not available)'));
+        }
+        if (!res.locals.authz_data.has_course_permission_own) {
+          return next(error.make(403, 'Access denied (must be a course Owner)'));
+        }
+        sqldb.queryZeroOrOneRow(
+          sql.sharing_set_add,
+          {
+            course_id: res.locals.course.id,
+            question_id: res.locals.question.id,
+            unsafe_sharing_set_id: req.body.unsafe_sharing_set_id,
+          },
+          (err) => {
+            if (ERR(err, next)) return;
+            res.redirect(req.originalUrl);
+          },
+        );
+      })
+      .catch((err) => next(err));
+  } else if (req.body.__action === 'share_publicly') {
+    debug('Add question to sharing set');
+    features
+      .enabledFromLocals('question-sharing', res.locals)
+      .then((questionSharingEnabled) => {
+        if (!questionSharingEnabled) {
+          return next(error.make(403, 'Access denied (feature not available)'));
+        }
+        if (!res.locals.authz_data.has_course_permission_own) {
+          return next(error.make(403, 'Access denied (must be a course Owner)'));
+        }
+        sqldb.queryZeroOrOneRow(
+          sql.update_question_shared_publicly,
+          {
+            course_id: res.locals.course.id,
+            question_id: res.locals.question.id,
+          },
+          (err) => {
+            if (ERR(err, next)) return;
+            res.redirect(req.originalUrl);
+          },
+        );
+      })
+      .catch((err) => next(err));
   } else {
     next(
       error.make(400, 'unknown __action: ' + req.body.__action, {
         locals: res.locals,
         body: req.body,
-      })
+      }),
     );
   }
 });
 
 router.get('/', function (req, res, next) {
+  if (res.locals.question.course_id !== res.locals.course.id) {
+    return next(error.make(403, 'Access denied'));
+  }
   // Construct the path of the question test route. We'll do this based on
   // `originalUrl` so that this router doesn't have to be aware of where it's
   // mounted.
-  let questionTestPath = new URL(`${req.protocol}://${req.get('host')}${req.originalUrl}`).pathname;
+  const host = getCanonicalHost(req);
+  let questionTestPath = new URL(`${host}${req.originalUrl}`).pathname;
   if (!questionTestPath.endsWith('/')) {
     questionTestPath += '/';
   }
@@ -227,11 +263,13 @@ router.get('/', function (req, res, next) {
   // here because this form will actually post to a different route, not `req.originalUrl`.
   const questionTestCsrfToken = generateSignedToken(
     { url: questionTestPath, authn_user_id: res.locals.authn_user.user_id },
-    config.secretKey
+    config.secretKey,
   );
 
   res.locals.questionTestPath = questionTestPath;
   res.locals.questionTestCsrfToken = questionTestCsrfToken;
+
+  res.locals.isEnterprise = isEnterprise();
 
   async.series(
     [
@@ -239,7 +277,7 @@ router.get('/', function (req, res, next) {
         res.locals.questionGHLink = null;
         if (res.locals.course.repository) {
           const GHfound = res.locals.course.repository.match(
-            /^git@github.com:\/?(.+?)(\.git)?\/?$/
+            /^git@github.com:\/?(.+?)(\.git)?\/?$/,
           );
           if (GHfound) {
             res.locals.questionGHLink =
@@ -268,18 +306,39 @@ router.get('/', function (req, res, next) {
             if (ERR(err, callback)) return;
             res.locals.a_with_q_for_all_ci = result.rows[0].assessments_from_question_id;
             callback(null);
-          }
+          },
         );
+      },
+      async () => {
+        res.locals.sharing_enabled = await features.enabledFromLocals(
+          'question-sharing',
+          res.locals,
+        );
+
+        if (res.locals.sharing_enabled) {
+          let result = await sqldb.queryAsync(sql.select_sharing_sets, {
+            question_id: res.locals.question.id,
+            course_id: res.locals.course.id,
+          });
+          res.locals.sharing_sets_in = result.rows.filter((row) => row.in_set);
+          res.locals.sharing_sets_other = result.rows.filter((row) => !row.in_set);
+        }
+      },
+      async () => {
+        res.locals.editable_courses = await selectCoursesWithEditAccess({
+          user_id: res.locals.user.user_id,
+          is_administrator: res.locals.is_administrator,
+        });
       },
     ],
     (err) => {
       if (ERR(err, next)) return;
       res.locals.infoPath = encodePath(
-        path.join('questions', res.locals.question.qid, 'info.json')
+        path.join('questions', res.locals.question.qid, 'info.json'),
       );
       res.render(__filename.replace(/\.js$/, '.ejs'), res.locals);
-    }
+    },
   );
 });
 
-module.exports = router;
+export default router;

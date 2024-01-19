@@ -2,52 +2,25 @@
 
 // The OpenTelemetry instrumentation for Express breaks our ability to inspect
 // the Express routes. We need to disable it before loading the server.
-const { disableInstrumentations } = require('@prairielearn/opentelemetry');
+import { disableInstrumentations } from '@prairielearn/opentelemetry';
 disableInstrumentations();
 
-const { test } = require('mocha');
+import { test } from 'mocha';
 const axe = require('axe-core');
-const jsdom = require('jsdom');
-const fetch = require('node-fetch').default;
-const { A11yError } = require('@sa11y/format');
-const util = require('util');
+import { JSDOM } from 'jsdom';
+import fetch from 'node-fetch';
+import { A11yError } from '@sa11y/format';
 const expressListEndpoints = require('express-list-endpoints');
-const sqldb = require('@prairielearn/postgres');
+import * as sqldb from '@prairielearn/postgres';
 
-const server = require('../../server');
-const news_items = require('../../news_items');
-const { config } = require('../../lib/config');
-const helperServer = require('../helperServer');
-const { EXAMPLE_COURSE_PATH } = require('../../lib/paths');
+import * as server from '../../server';
+import * as news_items from '../../news_items';
+import { config } from '../../lib/config';
+import * as helperServer from '../helperServer';
+import { features } from '../../lib/features/index';
+import { EXAMPLE_COURSE_PATH } from '../../lib/paths';
 
 const SITE_URL = 'http://localhost:' + config.serverPort;
-
-/**
- * Several pages have very large DOMs or attributes that AXE runs very slow on.
- * None of these elements have accessibility components, so we'll special-case these
- * and remove them before running AXE.
- *
- * @param {import('jsdom').JSDOM} page
- */
-function cleanLargePages(url, page) {
-  if (url === '/pl/course_instance/1/instructor/course_admin/questions') {
-    // This attribute is very large, which somehow corresponds to a long running
-    // time for AXE. It's irrelevant for our checks, so we just remove it.
-    page.window.document.querySelector('#questionsTable')?.removeAttribute('data-data');
-  }
-
-  if (
-    url === '/pl/course_instance/1/instructor/instance_admin/settings' ||
-    /\/pl\/course_instance\/1\/instructor\/assessment\/\d+\/settings/.test(url)
-  ) {
-    // The SVG for the QR code contains many elements, which in turn makes AXE
-    // run very slow. We don't need to check the accessibility of the QR code
-    // itself, so we'll remove the children.
-    page.window.document
-      .querySelectorAll('#js-student-link-qrcode svg > *')
-      .forEach((e) => e.remove());
-  }
-}
 
 /**
  * Loads the given URL into a JSDOM object.
@@ -62,7 +35,7 @@ async function loadPageJsdom(url) {
     }
     return res.text();
   });
-  return new jsdom.JSDOM(text);
+  return new JSDOM(text);
 }
 
 /**
@@ -72,8 +45,9 @@ async function loadPageJsdom(url) {
  */
 async function checkPage(url) {
   const page = await loadPageJsdom(SITE_URL + url);
-  cleanLargePages(url, page);
-  const results = await axe.run(page.window.document.documentElement);
+  const results = await axe.run(page.window.document.documentElement, {
+    resultTypes: ['violations', 'incomplete'],
+  });
   A11yError.checkAndThrow(results.violations);
 }
 
@@ -135,6 +109,8 @@ const SKIP_ROUTES = [
 
   // File downloads.
   '/pl/course_instance/:course_instance_id/assessment_instance/:assessment_instance_id/file/:unsafe_file_id/:unsafe_display_filename',
+  '/pl/course_instance/:course_instance_id/assessment/:assessment_id/clientFilesCourse/*',
+  '/pl/course_instance/:course_instance_id/assessment/:assessment_id/clientFilesCourseInstance/*',
   '/pl/course_instance/:course_instance_id/assessment/:assessment_id/clientFilesAssessment/*',
   '/pl/course_instance/:course_instance_id/cacheableElementExtensions/:cachebuster/*',
   '/pl/course_instance/:course_instance_id/cacheableElements/:cachebuster/*',
@@ -143,12 +119,15 @@ const SKIP_ROUTES = [
   '/pl/course_instance/:course_instance_id/elementExtensions/*',
   '/pl/course_instance/:course_instance_id/elements/*',
   '/pl/course_instance/:course_instance_id/instance_question/:instance_question_id/file/:filename',
+  '/pl/course_instance/:course_instance_id/instance_question/:instance_question_id/clientFilesCourse/*',
   '/pl/course_instance/:course_instance_id/instance_question/:instance_question_id/clientFilesQuestion/*',
   '/pl/course_instance/:course_instance_id/instance_question/:instance_question_id/generatedFilesQuestion/variant/:variant_id/*',
   '/pl/course_instance/:course_instance_id/instance_question/:instance_question_id/submission/:submission_id/file/*',
   '/pl/course_instance/:course_instance_id/instance_question/:instance_question_id/text/:filename',
   '/pl/course_instance/:course_instance_id/instructor/assessment_instance/:assessment_instance_id/:filename',
   '/pl/course_instance/:course_instance_id/instructor/assessment/:assessment_id/assessment_statistics/:filename',
+  '/pl/course_instance/:course_instance_id/instructor/assessment/:assessment_id/clientFilesCourse/*',
+  '/pl/course_instance/:course_instance_id/instructor/assessment/:assessment_id/clientFilesCourseInstance/*',
   '/pl/course_instance/:course_instance_id/instructor/assessment/:assessment_id/clientFilesAssessment/*',
   '/pl/course_instance/:course_instance_id/instructor/assessment/:assessment_id/downloads/:filename',
   '/pl/course_instance/:course_instance_id/instructor/assessment/:assessment_id/file_download/*',
@@ -165,10 +144,12 @@ const SKIP_ROUTES = [
   '/pl/course_instance/:course_instance_id/instructor/instance_admin/file_download/*',
   '/pl/course_instance/:course_instance_id/instructor/instance_admin/gradebook/:filename',
   '/pl/course_instance/:course_instance_id/instructor/instance_admin/gradebook/raw_data.json',
+  '/pl/course_instance/:course_instance_id/instructor/instance_question/:instance_question_id/clientFilesCourse/*',
   '/pl/course_instance/:course_instance_id/instructor/instance_question/:instance_question_id/clientFilesQuestion/*',
   '/pl/course_instance/:course_instance_id/instructor/instance_question/:instance_question_id/generatedFilesQuestion/variant/:variant_id/*',
   '/pl/course_instance/:course_instance_id/instructor/instance_question/:instance_question_id/submission/:submission_id/file/*',
   '/pl/course_instance/:course_instance_id/instructor/news_item/:news_item_id/*',
+  '/pl/course_instance/:course_instance_id/instructor/question/:question_id/clientFilesCourse/*',
   '/pl/course_instance/:course_instance_id/instructor/question/:question_id/clientFilesQuestion/*',
   '/pl/course_instance/:course_instance_id/instructor/question/:question_id/generatedFilesQuestion/variant/:variant_id/*',
   '/pl/course_instance/:course_instance_id/instructor/question/:question_id/file_download/*',
@@ -184,6 +165,7 @@ const SKIP_ROUTES = [
   '/pl/course/:course_id/clientFilesCourse/*',
   '/pl/course/:course_id/course_admin/file_download/*',
   '/pl/course/:course_id/news_item/:news_item_id/*',
+  '/pl/course/:course_id/question/:question_id/clientFilesCourse/*',
   '/pl/course/:course_id/question/:question_id/clientFilesQuestion/*',
   '/pl/course/:course_id/elements/*',
   '/pl/course/:course_id/elementExtensions/*',
@@ -195,7 +177,11 @@ const SKIP_ROUTES = [
   '/pl/course/:course_id/question/:question_id/statistics/:filename',
   '/pl/course/:course_id/question/:question_id/submission/:submission_id/file/*',
   '/pl/course/:course_id/question/:question_id/text/:filename',
+  '/pl/course/:course_id/grading_job/:job_id/file/:file',
   '/pl/news_item/:news_item_id/*',
+  '/pl/public/course/:course_id/question/:question_id/clientFilesQuestion/*',
+  '/pl/public/course/:course_id/question/:question_id/generatedFilesQuestion/variant/:variant_id/*',
+  '/pl/public/course/:course_id/question/:question_id/submission/:submission_id/file/*',
 
   // Renders partial HTML documents, not a full page.
   '/pl/course_instance/:course_instance_id/instance_question/:instance_question_id/variant/:variant_id/submission/:submission_id',
@@ -204,6 +190,7 @@ const SKIP_ROUTES = [
   '/pl/course_instance/:course_instance_id/instructor/question/:question_id/preview/variant/:variant_id/submission/:submission_id',
   '/pl/course_instance/:course_instance_id/assessment_instance/:assessment_instance_id/time_remaining',
   '/pl/course/:course_id/question/:question_id/preview/variant/:variant_id/submission/:submission_id',
+  '/pl/public/course/:course_id/question/:question_id/preview/variant/:variant_id/submission/:submission_id',
 
   // These pages just redirect to other pages and thus don't have to be tested.
   '/pl/course_instance/:course_instance_id/instructor/assessment/:assessment_id/manual_grading/assessment_question/:assessment_question_id/next_ungraded',
@@ -222,6 +209,11 @@ const SKIP_ROUTES = [
   // Admin page; we aren't guaranteed to have subpages to navigate to.
   '/pl/administrator/batchedMigrations/:batched_migration_id',
   '/pl/administrator/features/:feature',
+  '/pl/administrator/features/:feature/modal',
+
+  // These are only HTML fragments rendered by HTMX; we can't test them as full
+  // HTML documents.
+  /^\/pl\/navbar\/course/,
 
   // TODO: add tests for file editing/viewing.
   /\/file_edit\/\*$/,
@@ -250,6 +242,7 @@ const SKIP_ROUTES = [
 
   // TODO: submit an answer to a question so we can test this page.
   '/pl/course_instance/:course_instance_id/instructor/grading_job/:job_id',
+  '/pl/course/:course_id/grading_job/:job_id',
 ];
 
 function shouldSkipPath(path) {
@@ -269,7 +262,7 @@ describe('accessibility', () => {
   let routeParams = {};
   before('set up testing server', async function () {
     config.cronActive = false;
-    await util.promisify(helperServer.before(EXAMPLE_COURSE_PATH).bind(this))();
+    await helperServer.before(EXAMPLE_COURSE_PATH).call(this);
     config.cronActive = true;
 
     // We want to test a news item page, so we need to "init" them.
@@ -282,22 +275,24 @@ describe('accessibility', () => {
 
     const firstNewsItemResult = await sqldb.queryOneRowAsync(
       'SELECT id FROM news_items ORDER BY id ASC LIMIT 1',
-      {}
+      {},
     );
 
     const questionGalleryAssessmentResult = await sqldb.queryOneRowAsync(
       'SELECT id FROM assessments WHERE tid = $tid',
       {
         tid: 'gallery/elements',
-      }
+      },
     );
 
     const codeElementQuestionResult = await sqldb.queryOneRowAsync(
       'SELECT id FROM questions WHERE qid = $qid',
       {
         qid: 'element/code',
-      }
+      },
     );
+
+    await features.enable('question-sharing');
 
     routeParams = {
       ...STATIC_ROUTE_PARAMS,
@@ -305,11 +300,16 @@ describe('accessibility', () => {
       assessment_id: questionGalleryAssessmentResult.rows[0].id,
       question_id: codeElementQuestionResult.rows[0].id,
     };
+
+    await sqldb.queryOneRowAsync(
+      'UPDATE questions SET shared_publicly = true WHERE id = $question_id',
+      { question_id: routeParams.question_id },
+    );
   });
   after('shut down testing server', helperServer.after);
 
   test('All pages pass accessibility checks', async function () {
-    this.timeout(120_000);
+    this.timeout(240_000);
 
     const missingParamsEndpoints = [];
     const failingEndpoints = [];

@@ -1,11 +1,12 @@
-var assert = require('chai').assert;
-var request = require('request');
-var cheerio = require('cheerio');
-var _ = require('lodash');
+// @ts-check
+import { assert } from 'chai';
+const request = require('request');
+import * as cheerio from 'cheerio';
+const _ = require('lodash');
 
-var helperServer = require('./helperServer');
-var helperQuestion = require('./helperQuestion');
-var helperExam = require('./helperExam');
+import * as helperServer from './helperServer';
+import * as helperQuestion from './helperQuestion';
+import * as helperExam from './helperExam';
 
 const locals = {};
 
@@ -134,7 +135,7 @@ describe('Instructor assessment editing', function () {
       locals.instructorAssessmentUrl = locals.siteUrl + elemList[0].attribs.href;
       assert.equal(
         locals.instructorAssessmentUrl,
-        locals.instructorBaseUrl + '/assessment/' + locals.assessment_id + '/'
+        locals.instructorBaseUrl + '/assessment/' + locals.assessment_id + '/',
       );
     });
   });
@@ -204,7 +205,7 @@ describe('Instructor assessment editing', function () {
   describe('7. edit-question-points form', function () {
     it('should exist', function () {
       elemList = locals.$(
-        '#instanceQuestionList td:contains("addNumbers") ~ td .editQuestionPointsButton'
+        '#instanceQuestionList td:contains("addNumbers") ~ td .editQuestionPointsButton',
       );
       assert.lengthOf(elemList, 1);
     });
@@ -265,7 +266,7 @@ describe('Instructor assessment editing', function () {
           }
           page = body;
           callback(null);
-        }
+        },
       );
     });
     it('should parse', function () {
@@ -282,7 +283,7 @@ describe('Instructor assessment editing', function () {
   describe('9. edit-question-score-perc form', function () {
     it('should exist', function () {
       elemList = locals.$(
-        '#instanceQuestionList td:contains("addNumbers") ~ td .editQuestionScorePercButton'
+        '#instanceQuestionList td:contains("addNumbers") ~ td .editQuestionScorePercButton',
       );
       assert.lengthOf(elemList, 1);
     });
@@ -343,7 +344,7 @@ describe('Instructor assessment editing', function () {
           }
           page = body;
           callback(null);
-        }
+        },
       );
     });
     it('should parse', function () {
@@ -420,7 +421,7 @@ describe('Instructor assessment editing', function () {
           }
           page = body;
           callback(null);
-        }
+        },
       );
     });
     it('should parse', function () {
@@ -497,7 +498,7 @@ describe('Instructor assessment editing', function () {
           }
           page = body;
           callback(null);
-        }
+        },
       );
     });
     it('should parse', function () {
@@ -554,14 +555,14 @@ describe('Instructor assessment editing', function () {
     it('should contain a row for the dev user', function () {
       locals.gradebookDataRow = _.filter(
         locals.gradebookData,
-        (row) => row.uid === 'dev@illinois.edu'
+        (row) => row.uid === 'dev@illinois.edu',
       );
       assert.lengthOf(locals.gradebookDataRow, 1);
     });
     it('should contain the correct score in the dev user row', function () {
       assert.equal(
         locals.gradebookDataRow[0][`score_${locals.assessment_id}`],
-        assessmentSetScorePerc
+        assessmentSetScorePerc,
       );
     });
     it('should contain the correct assessment instance id in the dev user row', function () {
@@ -593,7 +594,7 @@ describe('Instructor assessment editing', function () {
           }
           page = body;
           callback(null);
-        }
+        },
       );
     });
     it('should parse', function () {

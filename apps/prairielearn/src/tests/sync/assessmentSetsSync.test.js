@@ -1,8 +1,7 @@
-const chai = require('chai');
-const util = require('./util');
-const helperDb = require('../helperDb');
-
-const { assert } = chai;
+// @ts-check
+import { assert } from 'chai';
+import * as util from './util';
+import * as helperDb from '../helperDb';
 
 /**
  * Checks that the assessment set present in the database matches the data
@@ -46,7 +45,7 @@ describe('Assessment set syncing', () => {
     await util.overwriteAndSyncCourseData(courseData, courseDir);
     const syncedAssessmentSets = await util.dumpTable('assessment_sets');
     const syncedAssessmentSet = syncedAssessmentSets.find(
-      (as) => as.name === newAssessmentSet.name
+      (as) => as.name === newAssessmentSet.name,
     );
     checkAssessmentSet(syncedAssessmentSet, newAssessmentSet);
   });
@@ -61,7 +60,7 @@ describe('Assessment set syncing', () => {
     await util.overwriteAndSyncCourseData(courseData, courseDir);
     const syncedAssessmentSets = await util.dumpTable('assessment_sets');
     const syncedAssessmentSet = syncedAssessmentSets.find(
-      (as) => as.name === oldAssessmentSet.name
+      (as) => as.name === oldAssessmentSet.name,
     );
     assert.isUndefined(syncedAssessmentSet);
   });
@@ -101,11 +100,11 @@ describe('Assessment set syncing', () => {
     await util.writeAndSyncCourseData(courseData);
     const syncedAssessmentSets = await util.dumpTable('assessment_sets');
     const syncedAssessmentSet = syncedAssessmentSets.find(
-      (as) => as.name === newAssessmentSet1.name
+      (as) => as.name === newAssessmentSet1.name,
     );
     checkAssessmentSet(syncedAssessmentSet, newAssessmentSet2);
     const syncedCourses = await util.dumpTable('pl_courses');
     const syncedCourse = syncedCourses.find((c) => c.short_name === courseData.course.name);
-    assert.match(syncedCourse.sync_warnings, /Found duplicates in 'assessmentSets'/);
+    assert.match(syncedCourse?.sync_warnings, /Found duplicates in 'assessmentSets'/);
   });
 });

@@ -1,11 +1,11 @@
 // @ts-check
-const { assert } = require('chai');
-const tmp = require('tmp-promise');
-const fs = require('fs-extra');
-const path = require('path');
+import { assert } from 'chai';
+import * as tmp from 'tmp-promise';
+import * as fs from 'fs-extra';
+import * as path from 'path';
 
-const courseDb = require('../../sync/course-db');
-const infofile = require('../../sync/infofile');
+import * as courseDb from '../../sync/course-db';
+import * as infofile from '../../sync/infofile';
 
 /**
  * @param {(dir: string) => Promise<void>} callback
@@ -68,7 +68,6 @@ function getQuestion() {
     uuid: 'f4ff2429-926e-4358-9e1f-d2f377e2036a',
     title: 'Test question',
     topic: 'Test',
-    secondaryTopics: [],
     tags: ['test'],
     type: 'v3',
   };
@@ -79,7 +78,6 @@ function getAlternativeQuestion() {
     uuid: '697a6188-8215-4806-92a1-592987342b9e',
     title: 'Another test question',
     topic: 'Test',
-    secondaryTopics: [],
     tags: ['test'],
     type: 'Calculation',
   };
@@ -222,12 +220,12 @@ describe('course database', () => {
         assert.equal(Object.keys(result).length, 3);
         assert.match(
           infofile.stringifyWarnings(result['question1']),
-          /UUID.*is used in other questions/
+          /UUID.*is used in other questions/,
         );
         assert.isFalse(infofile.hasErrors(result['question1']));
         assert.match(
           infofile.stringifyWarnings(result['question2']),
-          /UUID.*is used in other questions/
+          /UUID.*is used in other questions/,
         );
         assert.isFalse(infofile.hasErrors(result['question2']));
         assert.isFalse(infofile.hasErrors(result['question3']));
