@@ -174,7 +174,7 @@ function SamlLoginButton({ institutionId }) {
 function CasLoginButton() {
   return html`
     <a class="btn btn-primary d-block position-relative" href="/pl/caslogin" role="button">
-      <span class="font-weight-bold">Sign in with Google</span>
+      <span class="font-weight-bold">Sign in with CAS</span>
     </a>
   `;
 }
@@ -243,7 +243,6 @@ export function AuthLoginUnsupportedProvider({
   const supportsShib = supportedProviders.some((p) => p.name === 'Shibboleth');
   const supportsGoogle = supportedProviders.some((p) => p.name === 'Google');
   const supportsAzure = supportedProviders.some((p) => p.name === 'Azure');
-  const supportsCas = supportedProviders.some((p) => p.name === 'CAS');
 
   const defaultProvider = supportedProviders.find((p) => p.is_default === true);
   const hasNonDefaultProviders = supportedProviders.find(
@@ -258,7 +257,7 @@ export function AuthLoginUnsupportedProvider({
     defaultProvider?.name !== 'Shibboleth';
   const showGoogle = config.hasOauth && supportsGoogle && defaultProvider?.name !== 'Google';
   const showAzure = config.hasAzure && supportsAzure && defaultProvider?.name !== 'Azure';
-  const showCas = config.hasCas && supportsCas;
+  const showCas = config.hasCas;
 
   let defaultProviderButton: HtmlValue = null;
   switch (defaultProvider?.name) {
