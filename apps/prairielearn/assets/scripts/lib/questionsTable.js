@@ -1,6 +1,7 @@
 /* eslint-env browser, jquery */
 
 import _ from 'lodash';
+
 import { onDocumentReady, decodeData } from '@prairielearn/browser-utils';
 import { html } from '@prairielearn/html';
 
@@ -58,9 +59,11 @@ onDocumentReady(() => {
         <i class="fa fa-exclamation-triangle text-warning" aria-hidden="true"></i>
       </button>`;
     }
-    text += html`<a class="formatter-data" href="${urlPrefix}/question/${question.id}/preview"
-      >${qidPrefix}${question.qid}</a
-    >`;
+    text += html`
+      <a class="formatter-data" href="${urlPrefix}/question/${question.id}/preview">
+        ${qidPrefix}${question.qid}
+      </a>
+    `;
     if (question.open_issue_count > 0) {
       text += html`<a
         class="badge badge-pill badge-danger ml-1"
@@ -172,8 +175,8 @@ onDocumentReady(() => {
         },
       },
     },
-    onPreBody: function () {},
-    onResetView: function () {
+    onPreBody() {},
+    onResetView() {
       $('.js-sync-popover[data-toggle="popover"]')
         .popover({
           sanitize: false,

@@ -80,8 +80,9 @@ In general we prefer simplicity. We standardize on JavaScript (Node.js) and SQL 
 - To insert more debugging output, import `debug` and use it like this:
 
   ```javascript
-  var path = require('path');
-  var debug = require('debug')('prairielearn:' + path.basename(__filename, '.js'));
+  import debugfn from 'debug';
+
+  const debug = debugfn('prairielearn:my-file');
 
   // in some function later
   debug('func()', 'param:', param);
@@ -808,12 +809,7 @@ WHERE
         res.redirect(req.originalUrl);
       });
     } else {
-      return next(
-        error.make(400, 'unknown __action', {
-          body: req.body,
-          locals: res.locals,
-        }),
-      );
+      return next(new error.HttpStatusError(400, `unknown __action: ${req.body.__action}`));
     }
   });
   ```
@@ -847,7 +843,7 @@ WHERE
 
 [ESLint](http://eslint.org/) and [Prettier](https://prettier.io/) are used to enforce consistent code conventions and formatting throughout the codebase. See `.eslintrc.js` and `.prettierrc.json` in the root of the PrairieLearn repository to view our specific configuration. The repo includes an [`.editorconfig`](https://editorconfig.org/) file that most editors will detect and use to automatically configure things like indentation. If your editor doesn't natively support an EditorConfig file, there are [plugins](https://editorconfig.org/#download) available for most other editors.
 
-For Python files, [Black](https://black.readthedocs.io/en/stable/), [isort](https://pycqa.github.io/isort/), and [flake8](https://flake8.pycqa.org/en/latest/) are used to enforce code conventions, and [Pyright](https://github.com/microsoft/pyright) is used for static typechecking. See `pyproject.toml` in the root of the PrairieLearn repository to view our specific configuration. We encourage all new Python code to include type hints for use with the static typechecker, as this makes it easier to read, review, and verify contributions.
+For Python files, [ruff](https://docs.astral.sh/ruff/) is used for autoformatting and enforcing code conventions, and [Pyright](https://github.com/microsoft/pyright) is used for static typechecking. See `pyproject.toml` in the root of the PrairieLearn repository to view our specific configuration. We encourage all new Python code to include type hints for use with the static typechecker, as this makes it easier to read, review, and verify contributions.
 
 To lint the code, use `make lint`. This is also run by the CI tests.
 
@@ -892,21 +888,21 @@ To automatically fix lint and formatting errors, run `make format`.
   | Error level     | Caused                                                           | Stored                                                                                    | Reported                             | Effect                                                                                                                                                                     |
   | --------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | System errors   | Internal PrairieLearn errors                                     | On-disk logs                                                                              | Error page                           | Operation is blocked. Data is not saved to the database.                                                                                                                   |
-  | Question errors | Errors in question code                                          | `issues` table                                                                            | Issue panels on the question page    | `variant.broken` or `submission.broken` set to `true`. Operation completes, but future operations are blocked.                                                             |
+  | Question errors | Errors in question code                                          | `issues` table                                                                            | Issue panels on the question page    | `variant.broken_at != null` or `submission.broken == true`. Operation completes, but future operations are blocked.                                                        |
   | Student errors  | Invalid data submitted by the student (unparsable or ungradable) | `submission.gradable` set to `false` and details are stored in `submission.format_errors` | Inside the rendered submission panel | The submission is not assigned a score and no further action is taken (e.g., points are changed for the instance question). The student can resubmit to correct the error. |
 
 - The important variables involved in tracking question errors are:
 
-  | Variable                   | Error level    | Description                                                                                                                                                                                          |
-  | -------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `variant.broken`           | Question error | Set to `true` if there were question code errors in generating the variant. Such a variant will be not have `render()` functions called, but will instead be displayed as `This question is broken`. |
-  | `submission.broken`        | Question error | Set to `true` if there question code errors in parsing or grading the variant. After `submission.broken` is `true`, no further actions will be taken with the submission.                            |
-  | `issues` table             | Question error | Rows are inserted to record the details of the errors that caused `variant.broken` or `submission.broken` to be set to `true`.                                                                       |
-  | `submission.gradable`      | Student error  | Whether this submission can be given a score. Set to `false` if format errors in the `submitted_answer` were encountered during either parsing or grading.                                           |
-  | `submission.format_errors` | Student error  | Details on any errors during parsing or grading. Should be set to something meaningful if `gradable = false` to explain what was wrong with the submitted answer.                                    |
-  | `submission.graded_at`     | None           | NULL if grading has not yet occurred, otherwise a timestamp.                                                                                                                                         |
-  | `submission.score`         | None           | Final score for the submission. Only used if `gradable = true` and `graded_at` is not NULL.                                                                                                          |
-  | `submission.feedback`      | None           | Feedback generated during grading. Only used if `gradable = true` and `graded_at` is not NULL.                                                                                                       |
+  | Variable                   | Error level    | Description                                                                                                                                                                                           |
+  | -------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `variant.broken_at`        | Question error | Set to `NOW()` if there were question code errors in generating the variant. Such a variant will be not have `render()` functions called, but will instead be displayed as `This question is broken`. |
+  | `submission.broken`        | Question error | Set to `true` if there question code errors in parsing or grading the variant. After `submission.broken` is `true`, no further actions will be taken with the submission.                             |
+  | `issues` table             | Question error | Rows are inserted to record the details of the errors that caused `variant.broken != null` or `submission.broken == true` to be set to `true`.                                                        |
+  | `submission.gradable`      | Student error  | Whether this submission can be given a score. Set to `false` if format errors in the `submitted_answer` were encountered during either parsing or grading.                                            |
+  | `submission.format_errors` | Student error  | Details on any errors during parsing or grading. Should be set to something meaningful if `gradable = false` to explain what was wrong with the submitted answer.                                     |
+  | `submission.graded_at`     | None           | NULL if grading has not yet occurred, otherwise a timestamp.                                                                                                                                          |
+  | `submission.score`         | None           | Final score for the submission. Only used if `gradable = true` and `graded_at` is not NULL.                                                                                                           |
+  | `submission.feedback`      | None           | Feedback generated during grading. Only used if `gradable = true` and `graded_at` is not NULL.                                                                                                        |
 
 - Note that `submission.format_errors` stores information about student errors, while the `issues` table stores information about question code errors.
 

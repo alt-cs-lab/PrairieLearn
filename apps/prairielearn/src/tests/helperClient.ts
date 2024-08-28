@@ -1,7 +1,8 @@
-import fetch, { RequestInit, Response } from 'node-fetch';
 import { assert } from 'chai';
 import * as cheerio from 'cheerio';
-import { config } from '../lib/config';
+import fetch, { RequestInit, Response } from 'node-fetch';
+
+import { config } from '../lib/config.js';
 
 interface CheerioResponse extends Response {
   $: cheerio.CheerioAPI;
@@ -136,12 +137,23 @@ export function parseInstanceQuestionId(url: string): number {
 }
 
 /**
+ * Get assessment instance id from URL params.
+ */
+export function parseAssessmentInstanceId(url: string): number {
+  const match = url.match(/assessment_instance\/(\d+)/);
+  assert(match);
+  const iqId = parseInt(match[1]);
+  assert.isNumber(iqId);
+  return iqId;
+}
+
+/**
  * Acts as 'save' or 'save and grade' button click on student instance question page.
  *
  * @param instanceQuestionUrl The instance question url the student is answering the question on.
  * @param payload JSON data structure type formed on the basis of the question
  * @param action The action to take
- * @param [fileData] File data to submit to the question
+ * @param fileData File data to submit to the question
  */
 export async function saveOrGrade(
   instanceQuestionUrl: string,

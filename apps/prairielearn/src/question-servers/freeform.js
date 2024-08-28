@@ -1,38 +1,39 @@
 // @ts-check
 
-import * as async from 'async';
-import * as _ from 'lodash';
-import * as fs from 'fs-extra';
 import * as path from 'path';
-import * as mustache from 'mustache';
+
+import * as async from 'async';
 // Use slim export, which relies on htmlparser2 instead of parse5. This provides
 // support for questions with legacy renderer.
 import * as cheerio from 'cheerio/lib/slim';
+import debugfn from 'debug';
+import fs from 'fs-extra';
+import _ from 'lodash';
+import mustache from 'mustache';
+import objectHash from 'object-hash';
 import * as parse5 from 'parse5';
-const debugfn = require('debug');
-const objectHash = require('object-hash');
 
-import { instrumented, metrics, instrumentedWithMetrics } from '@prairielearn/opentelemetry';
+import { cache } from '@prairielearn/cache';
 import { logger } from '@prairielearn/logger';
+import { instrumented, metrics, instrumentedWithMetrics } from '@prairielearn/opentelemetry';
 
-import * as schemas from '../schemas';
-import { config } from '../lib/config';
-import { withCodeCaller, FunctionMissingError } from '../lib/code-caller';
-import * as jsonLoad from '../lib/json-load';
-import * as cache from '../lib/cache';
-import { getOrUpdateCourseCommitHash } from '../models/course';
-import * as markdown from '../lib/markdown';
-import * as chunks from '../lib/chunks';
-import * as assets from '../lib/assets';
-import { APP_ROOT_PATH } from '../lib/paths';
-import { features } from '../lib/features';
+import * as assets from '../lib/assets.js';
+import * as chunks from '../lib/chunks.js';
+import { withCodeCaller, FunctionMissingError } from '../lib/code-caller/index.js';
+import { config } from '../lib/config.js';
+import { features } from '../lib/features/index.js';
+import * as jsonLoad from '../lib/json-load.js';
+import * as markdown from '../lib/markdown.js';
+import { APP_ROOT_PATH } from '../lib/paths.js';
+import { getOrUpdateCourseCommitHash } from '../models/course.js';
+import * as schemas from '../schemas/index.js';
 
-const debug = debugfn('prairielearn:' + path.basename(__filename, '.js'));
+const debug = debugfn('prairielearn:freeform');
 
 /**
  * @typedef {Object} QuestionProcessingContext
- * @property {import('../lib/db-types').Course} course
- * @property {import('../lib/db-types').Question} question
+ * @property {import('../lib/db-types.js').Course} course
+ * @property {import('../lib/db-types.js').Question} question
  * @property {string} course_dir
  * @property {string} course_dir_host
  * @property {string} question_dir
@@ -50,40 +51,12 @@ let courseElementsCache = {};
 let courseExtensionsCache = {};
 
 /**
- * This subclass of Error supports chaining.
- * If available, it uses the built-in support for property `.cause`.
- * Otherwise, it sets it up itself.
- *
- * @see https://github.com/tc39/proposal-error-cause
- */
-class CausedError extends Error {
-  /**
-   *
-   * @param {string} message
-   * @param {{ cause?: Error }} [options]
-   */
-  constructor(message, options) {
-    // @ts-expect-error -- Node 14 does not yet support `.cause`
-    super(message, options);
-    if (options?.cause && !('cause' in this)) {
-      const cause = options.cause;
-      // @ts-expect-error -- Node 14 does not yet support `.cause`
-      this.cause = cause;
-      if ('stack' in cause) {
-        // @ts-expect-error -- Node 14 does not yet support `.cause`
-        this.stack = this.stack + '\nCAUSE: ' + cause.stack;
-      }
-    }
-  }
-}
-
-/**
  * @typedef {Object} CourseIssueErrorOptions
  * @property {any} [data]
  * @property {boolean} [fatal]
  * @property {Error} [cause]
  */
-class CourseIssueError extends CausedError {
+class CourseIssueError extends Error {
   /**
    *
    * @param {string} message
@@ -525,7 +498,7 @@ function checkData(data, origData, phase) {
 /**
  *
  * @param {string} phase
- * @param {import('../lib/code-caller').CodeCaller} codeCaller
+ * @param {import('../lib/code-caller/index.js').CodeCaller} codeCaller
  * @param {any} data
  * @param {any} context
  * @param {string} html
@@ -602,6 +575,7 @@ async function traverseQuestionAndExecuteFunctions(phase, codeCaller, data, cont
       // We need to wrap it in another node, since only child nodes
       // are serialized
       const serializedNode = parse5.serialize({
+        nodeName: '#document-fragment',
         childNodes: [node],
       });
       let ret_val, consoleLog;
@@ -828,7 +802,7 @@ async function legacyTraverseQuestionAndExecuteFunctions(phase, codeCaller, data
 
 /**
  * @param {string} phase
- * @param {import('../lib/code-caller').CodeCaller} codeCaller
+ * @param {import('../lib/code-caller/index.js').CodeCaller} codeCaller
  * @param {any} data
  * @param {QuestionProcessingContext} context
  */
@@ -863,7 +837,7 @@ async function processQuestionHtml(phase, codeCaller, data, context) {
   }
 
   let processFunction;
-  /** @type {[string, import('../lib/code-caller/index').CodeCaller, any, any, any]} */
+  /** @type {[string, import('../lib/code-caller/index.js').CodeCaller, any, any, any]} */
   let args;
   if (context.renderer === 'experimental') {
     processFunction = experimentalProcess;
@@ -999,10 +973,9 @@ async function processQuestionServer(phase, codeCaller, data, html, fileData, co
 /**
  *
  * @param {string} phase
- * @param {import('../lib/code-caller').CodeCaller} codeCaller
+ * @param {import('../lib/code-caller/index.js').CodeCaller} codeCaller
  * @param {any} data
  * @param {QuestionProcessingContext} context
- * @returns
  */
 async function processQuestion(phase, codeCaller, data, context) {
   const meter = metrics.getMeter('prairielearn');
@@ -1071,7 +1044,7 @@ export async function generate(question, course, variant_seed) {
     };
     _.extend(data.options, getContextOptions(context));
 
-    return await withCodeCaller(context.course_dir_host, async (codeCaller) => {
+    return await withCodeCaller(course, async (codeCaller) => {
       const { courseIssues, data: resultData } = await processQuestion(
         'generate',
         codeCaller,
@@ -1091,7 +1064,7 @@ export async function generate(question, course, variant_seed) {
 
 export async function prepare(question, course, variant) {
   return instrumented('freeform.prepare', async () => {
-    if (variant.broken) throw new Error('attemped to prepare broken variant');
+    if (variant.broken_at) throw new Error('attempted to prepare broken variant');
 
     const context = await getContext(question, course);
     const data = {
@@ -1103,7 +1076,7 @@ export async function prepare(question, course, variant) {
     };
     _.extend(data.options, getContextOptions(context));
 
-    return await withCodeCaller(context.course_dir_host, async (codeCaller) => {
+    return await withCodeCaller(course, async (codeCaller) => {
       const { courseIssues, data: resultData } = await processQuestion(
         'prepare',
         codeCaller,
@@ -1132,18 +1105,18 @@ export async function prepare(question, course, variant) {
 
 /**
  * @param {'question' | 'answer' | 'submission'} panel
- * @param {import('../lib/code-caller').CodeCaller} codeCaller
- * @param {any} variant
- * @param {any} submission
- * @param {any} course
- * @param {any} locals
+ * @param {import('../lib/code-caller/index.js').CodeCaller} codeCaller
+ * @param {import('../lib/db-types.js').Variant} variant
+ * @param {import('../lib/db-types.js').Submission?} submission
+ * @param {import('../lib/db-types.js').Course} course
+ * @param {Record<string, any>} locals
  * @param {QuestionProcessingContext} context
  * @returns {Promise<RenderPanelResult>}
  */
 async function renderPanel(panel, codeCaller, variant, submission, course, locals, context) {
   debug(`renderPanel(${panel})`);
   // broken variant kills all rendering
-  if (variant.broken) {
+  if (variant.broken_at) {
     return {
       courseIssues: [],
       html: 'Broken question due to error in question code',
@@ -1172,12 +1145,12 @@ async function renderPanel(panel, codeCaller, variant, submission, course, local
     partial_scores: submission?.partial_scores ?? {},
     score: submission?.score ?? 0,
     feedback: submission?.feedback ?? {},
-    variant_seed: parseInt(variant.variant_seed, 36),
-    options: _.get(variant, 'options', {}),
+    variant_seed: parseInt(variant.variant_seed ?? '0', 36),
+    options: _.get(variant, 'options') ?? {},
     raw_submitted_answers: submission ? _.get(submission, 'raw_submitted_answer', {}) : {},
     editable: !!(locals.allowAnswerEditing && !locals.manualGradingInterface),
     manual_grading: !!locals.manualGradingInterface,
-    panel: panel,
+    panel,
     num_valid_submissions: _.get(variant, 'num_tries', null),
   };
 
@@ -1259,7 +1232,6 @@ export async function render(
   submission,
   submissions,
   course,
-  course_instance,
   locals,
 ) {
   return instrumented('freeform.render', async () => {
@@ -1283,7 +1255,7 @@ export async function render(
     // for where this is actually used.
     locals.question_renderer = context.renderer;
 
-    return withCodeCaller(context.course_dir_host, async (codeCaller) => {
+    return withCodeCaller(course, async (codeCaller) => {
       if (renderSelection.question) {
         const {
           courseIssues: newCourseIssues,
@@ -1375,7 +1347,7 @@ export async function render(
       };
 
       for (let type in question.dependencies) {
-        if (!_.has(dependencies, type)) continue;
+        if (!(type in dependencies)) continue;
 
         for (let dep of question.dependencies[type]) {
           if (!_.includes(dependencies[type], dep)) {
@@ -1442,7 +1414,7 @@ export async function render(
         }
 
         for (const type in elementDependencies) {
-          if (!_.has(dependencies, type)) continue;
+          if (!(type in dependencies)) continue;
 
           for (const dep of elementDependencies[type]) {
             if (!_.includes(dependencies[type], dep)) {
@@ -1501,7 +1473,7 @@ export async function render(
             }
 
             for (const type in extension) {
-              if (!_.has(dependencies, type)) continue;
+              if (!(type in dependencies)) continue;
 
               for (const dep of extension[type]) {
                 if (!_.includes(dependencies[type], dep)) {
@@ -1640,7 +1612,7 @@ export async function render(
 export async function file(filename, variant, question, course) {
   return instrumented('freeform.file', async (span) => {
     debug('file()');
-    if (variant.broken) throw new Error('attemped to get a file for a broken variant');
+    if (variant.broken_at) throw new Error('attempted to get a file for a broken variant');
 
     const context = await getContext(question, course);
 
@@ -1649,7 +1621,7 @@ export async function file(filename, variant, question, course) {
       correct_answers: _.get(variant, 'true_answer', {}),
       variant_seed: parseInt(variant.variant_seed, 36),
       options: _.get(variant, 'options', {}),
-      filename: filename,
+      filename,
     };
     _.extend(data.options, getContextOptions(context));
 
@@ -1659,7 +1631,7 @@ export async function file(filename, variant, question, course) {
       context,
       async () => {
         // function to compute the file data and return the cachedData
-        return withCodeCaller(context.course_dir_host, async (codeCaller) => {
+        return withCodeCaller(course, async (codeCaller) => {
           const { courseIssues, fileData } = await processQuestion(
             'file',
             codeCaller,
@@ -1683,7 +1655,7 @@ export async function file(filename, variant, question, course) {
 export async function parse(submission, variant, question, course) {
   return instrumented('freeform.parse', async () => {
     debug('parse()');
-    if (variant.broken) throw new Error('attemped to parse broken variant');
+    if (variant.broken_at) throw new Error('attempted to parse broken variant');
 
     const context = await getContext(question, course);
     const data = {
@@ -1698,7 +1670,7 @@ export async function parse(submission, variant, question, course) {
       gradable: _.get(submission, 'gradable', true),
     };
     _.extend(data.options, getContextOptions(context));
-    return withCodeCaller(context.course_dir_host, async (codeCaller) => {
+    return withCodeCaller(course, async (codeCaller) => {
       const { courseIssues, data: resultData } = await processQuestion(
         'parse',
         codeCaller,
@@ -1725,8 +1697,8 @@ export async function parse(submission, variant, question, course) {
 export async function grade(submission, variant, question, question_course) {
   return instrumented('freeform.grade', async () => {
     debug('grade()');
-    if (variant.broken) throw new Error('attemped to grade broken variant');
-    if (submission.broken) throw new Error('attemped to grade broken submission');
+    if (variant.broken_at) throw new Error('attempted to grade broken variant');
+    if (submission.broken) throw new Error('attempted to grade broken submission');
 
     const context = await getContext(question, question_course);
     let data = {
@@ -1743,7 +1715,7 @@ export async function grade(submission, variant, question, question_course) {
       gradable: submission.gradable,
     };
     _.extend(data.options, getContextOptions(context));
-    return withCodeCaller(context.course_dir_host, async (codeCaller) => {
+    return withCodeCaller(question_course, async (codeCaller) => {
       const { courseIssues, data: resultData } = await processQuestion(
         'grade',
         codeCaller,
@@ -1772,7 +1744,7 @@ export async function grade(submission, variant, question, question_course) {
 export async function test(variant, question, course, test_type) {
   return instrumented('freeform.test', async () => {
     debug('test()');
-    if (variant.broken) throw new Error('attemped to test broken variant');
+    if (variant.broken_at) throw new Error('attempted to test broken variant');
 
     const context = await getContext(question, course);
     let data = {
@@ -1786,10 +1758,10 @@ export async function test(variant, question, course, test_type) {
       options: _.get(variant, 'options', {}),
       raw_submitted_answers: {},
       gradable: true,
-      test_type: test_type,
+      test_type,
     };
     _.extend(data.options, getContextOptions(context));
-    return withCodeCaller(context.course_dir_host, async (codeCaller) => {
+    return withCodeCaller(course, async (codeCaller) => {
       const { courseIssues, data: resultData } = await processQuestion(
         'test',
         codeCaller,

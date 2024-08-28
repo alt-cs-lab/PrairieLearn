@@ -1,26 +1,25 @@
-//@ts-check
-const ERR = require('async-stacktrace');
-const _ = require('lodash');
-import { checkSignedToken } from '@prairielearn/signed-token';
+// @ts-check
+import ERR from 'async-stacktrace';
+import _ from 'lodash';
+
 import { logger } from '@prairielearn/logger';
 import * as sqldb from '@prairielearn/postgres';
 import * as Sentry from '@prairielearn/sentry';
+import { checkSignedToken } from '@prairielearn/signed-token';
 
-import { config } from './config';
-import { renderPanelsForSubmission } from './question-render';
-import * as socketServer from './socket-server';
+import { config } from './config.js';
+import { renderPanelsForSubmission } from './question-render.js';
+import * as socketServer from './socket-server.js';
 
-const sql = sqldb.loadSqlEquiv(__filename);
+const sql = sqldb.loadSqlEquiv(import.meta.url);
 
 /** @type {import('socket.io').Namespace} */
 let namespace;
 
 // This module MUST be initialized after socket-server
-export function init(callback) {
+export function init() {
   namespace = socketServer.io.of('/external-grading');
   namespace.on('connection', connection);
-
-  callback(null);
 }
 
 /**
@@ -61,6 +60,7 @@ export function connection(socket) {
         'url_prefix',
         'question_context',
         'csrf_token',
+        'authorized_edit',
       ])
     ) {
       return callback(null);
@@ -69,34 +69,33 @@ export function connection(socket) {
       return callback(null);
     }
 
-    renderPanelsForSubmission(
-      msg.submission_id,
-      msg.question_id,
-      msg.instance_question_id,
-      msg.variant_id,
-      msg.url_prefix,
-      msg.question_context,
-      msg.csrf_token,
-      msg.authorized_edit,
-      true, // renderScorePanels
-      (err, panels) => {
-        if (
-          ERR(err, (err) => {
-            logger.error('Error rendering panels for submission', err);
-            Sentry.captureException(err);
-          })
-        ) {
-          return;
-        }
+    renderPanelsForSubmission({
+      submission_id: msg.submission_id,
+      question_id: msg.question_id,
+      instance_question_id: msg.instance_question_id,
+      variant_id: msg.variant_id,
+      urlPrefix: msg.url_prefix,
+      questionContext: msg.question_context,
+      csrfToken: msg.csrf_token,
+      authorizedEdit: msg.authorized_edit,
+      renderScorePanels: true,
+    }).then(
+      (panels) => {
         callback({
           submission_id: msg.submission_id,
           answerPanel: panels.answerPanel,
           submissionPanel: panels.submissionPanel,
+          extraHeadersHtml: panels.extraHeadersHtml,
           questionScorePanel: panels.questionScorePanel,
           assessmentScorePanel: panels.assessmentScorePanel,
           questionPanelFooter: panels.questionPanelFooter,
           questionNavNextButton: panels.questionNavNextButton,
         });
+      },
+      (err) => {
+        logger.error('Error rendering panels for submission', err);
+        Sentry.captureException(err);
+        callback(null);
       },
     );
   });

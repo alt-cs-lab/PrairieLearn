@@ -1,5 +1,7 @@
 import ClipboardJS from 'clipboard';
 
+import { mathjaxTypeset } from './lib/mathjax.js';
+
 $(() => {
   resetInstructorGradingPanel();
 
@@ -293,6 +295,7 @@ function submitSettings(e, use_rubric) {
         input.value = oldCsrfToken;
       });
       resetInstructorGradingPanel();
+      await mathjaxTypeset();
     });
 }
 
@@ -452,6 +455,7 @@ function deleteRow(event) {
     table.querySelector('.js-no-rubric-item-note').classList.remove('d-none');
   }
   updateRubricItemOrderField();
+  checkRubricItemTotals();
 }
 
 function rowDragStart(event) {

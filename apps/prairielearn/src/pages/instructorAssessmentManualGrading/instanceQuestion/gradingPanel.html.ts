@@ -1,10 +1,13 @@
 import { html } from '@prairielearn/html';
-import { RubricInputSection } from './rubricInputSection.html';
+
+import { type Issue, type User } from '../../../lib/db-types.js';
+
 import {
   AutoPointsSection,
   ManualPointsSection,
   TotalPointsSection,
-} from './gradingPointsSection.html';
+} from './gradingPointsSection.html.js';
+import { RubricInputSection } from './rubricInputSection.html.js';
 
 interface SubmissionOrGradingJob {
   feedback: Record<string, any> | null;
@@ -13,7 +16,6 @@ interface SubmissionOrGradingJob {
 export function GradingPanel({
   resLocals,
   context,
-  rubric_settings_visible,
   graders,
   disable,
   hide_back_to_question,
@@ -25,8 +27,7 @@ export function GradingPanel({
 }: {
   resLocals: Record<string, any>;
   context: 'main' | 'existing' | 'conflicting';
-  rubric_settings_visible?: boolean;
-  graders?: Record<string, any> | null;
+  graders?: User[] | null;
   disable?: boolean;
   hide_back_to_question?: boolean;
   skip_text?: string;
@@ -40,6 +41,7 @@ export function GradingPanel({
   const points = custom_points ?? resLocals.instance_question.points ?? 0;
   const submission = grading_job ?? resLocals.submission;
   const assessment_question_url = `${resLocals.urlPrefix}/assessment/${resLocals.assessment_instance.assessment_id}/manual_grading/assessment_question/${resLocals.instance_question.assessment_question_id}`;
+  const open_issues: Issue[] = resLocals.issues.filter((issue) => issue.open);
   disable = disable || !resLocals.authz_data.has_course_instance_permission_edit;
   skip_text = skip_text || (disable ? 'Next' : 'Skip');
 
@@ -81,13 +83,7 @@ export function GradingPanel({
             `
           : ''}
         <li class="list-group-item">
-          ${ManualPointsSection({
-            context,
-            disable,
-            manual_points,
-            rubric_settings_visible,
-            resLocals,
-          })}
+          ${ManualPointsSection({ context, disable, manual_points, resLocals })}
           ${!resLocals.rubric_data?.replace_auto_points ||
           (!resLocals.assessment_question.max_auto_points && !auto_points)
             ? RubricInputSection({ resLocals, disable })
@@ -99,13 +95,7 @@ export function GradingPanel({
                 ${AutoPointsSection({ context, disable, auto_points, resLocals })}
               </li>
               <li class="list-group-item">
-                ${TotalPointsSection({
-                  context,
-                  disable,
-                  points,
-                  rubric_settings_visible,
-                  resLocals,
-                })}
+                ${TotalPointsSection({ context, disable, points, resLocals })}
                 ${resLocals.rubric_data?.replace_auto_points
                   ? RubricInputSection({ resLocals, disable })
                   : ''}
@@ -130,10 +120,32 @@ ${submission.feedback?.manual}</textarea
             </small>
           </label>
         </li>
+        ${open_issues.length > 0 && context !== 'existing'
+          ? html`
+              <li class="form-group list-group-item">
+                <div class="form-check">
+                  ${open_issues.map(
+                    (issue) => html`
+                      <input
+                        type="checkbox"
+                        id="close-issue-checkbox-${issue.id}"
+                        class="form-check-input"
+                        name="unsafe_issue_ids_close"
+                        value="${issue.id}"
+                      />
+                      <label class="w-100 form-check-label" for="close-issue-checkbox-${issue.id}">
+                        Close issue #${issue.id}
+                      </label>
+                    `,
+                  )}
+                </div>
+              </li>
+            `
+          : ''}
         <li class="list-group-item d-flex align-items-center">
           ${!hide_back_to_question
             ? html`
-                <a role="button" class="btn btn-primary" href="${assessment_question_url}">
+                <a class="btn btn-primary" href="${assessment_question_url}">
                   <i class="fas fa-arrow-left"></i>
                   Back to Question
                 </a>
@@ -154,7 +166,6 @@ ${submission.feedback?.manual}</textarea
               : ''}
             <div class="btn-group">
               <a
-                role="button"
                 class="btn btn-secondary"
                 href="${assessment_question_url}/next_ungraded?prior_instance_question_id=${resLocals
                   .instance_question.id}"
@@ -173,8 +184,8 @@ ${submission.feedback?.manual}</textarea
                       <span class="sr-only">Change assigned grader</span>
                     </button>
                     <div class="dropdown-menu dropdown-menu-right">
-                      ${(graders || []).forEach((grader) => {
-                        html`
+                      ${(graders || []).map(
+                        (grader) => html`
                           <button
                             type="submit"
                             class="dropdown-item"
@@ -183,8 +194,8 @@ ${submission.feedback?.manual}</textarea
                           >
                             Assign to: ${grader.name} (${grader.uid})
                           </button>
-                        `;
-                      })}
+                        `,
+                      )}
                       <button
                         type="submit"
                         class="dropdown-item"

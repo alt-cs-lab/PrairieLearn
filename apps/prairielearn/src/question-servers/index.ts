@@ -1,4 +1,4 @@
-import { Question, Course, Variant, Submission, CourseInstance } from '../lib/db-types';
+import { Question, Course, Variant, Submission } from '../lib/db-types.js';
 
 export type QuestionType = Question['type'];
 export type EffectiveQuestionType = 'Calculation' | 'Freeform';
@@ -61,7 +61,7 @@ export interface QuestionServer {
     question: Question,
     course: Course,
     variant_seed: string,
-  ) => QuestionServerReturnValue<GenerateResultData>;
+  ) => QuestionServerReturnValue<Partial<GenerateResultData>>;
   prepare: (
     question: Question,
     course: Course,
@@ -80,7 +80,6 @@ export interface QuestionServer {
     submission: Submission,
     submissions: Submission[],
     course: Course,
-    course_instance: CourseInstance,
     locals: Record<string, any>,
   ) => QuestionServerReturnValue<RenderResultData>;
   parse: (
@@ -97,7 +96,7 @@ export interface QuestionServer {
     variant: Variant,
     question: Question,
     course: Course,
-  ) => QuestionServerReturnValue<GradeResultData>;
+  ) => QuestionServerReturnValue<Partial<GradeResultData>>;
   file?: (
     filename: string,
     variant: Variant,
@@ -113,8 +112,8 @@ export interface QuestionServer {
 }
 
 const questionModules: Record<EffectiveQuestionType, QuestionServer> = {
-  Calculation: require('./calculation-subprocess'),
-  Freeform: require('./freeform'),
+  Calculation: await import('./calculation-subprocess.js'),
+  Freeform: await import('./freeform.js'),
 };
 
 const effectiveQuestionTypes: Record<QuestionType, EffectiveQuestionType> = {

@@ -1,22 +1,24 @@
-import { callbackify } from 'util';
-import * as fs from 'fs-extra';
+import fs from 'fs-extra';
+
+import { HttpStatusError } from '@prairielearn/error';
 import * as namedLocks from '@prairielearn/named-locks';
 import * as sqldb from '@prairielearn/postgres';
 
-import { createServerJob } from './server-jobs';
-import { config } from './config';
-import * as chunks from './chunks';
-import { syncDiskToSqlWithLock } from '../sync/syncFromDisk';
-import { IdSchema, User, UserSchema } from './db-types';
 import {
   getCourseCommitHash,
   getLockNameForCoursePath,
   getOrUpdateCourseCommitHash,
   selectCourseById,
   updateCourseCommitHash,
-} from '../models/course';
+} from '../models/course.js';
+import { syncDiskToSqlWithLock } from '../sync/syncFromDisk.js';
 
-const sql = sqldb.loadSqlEquiv(__filename);
+import * as chunks from './chunks.js';
+import { config } from './config.js';
+import { IdSchema, User, UserSchema } from './db-types.js';
+import { createServerJob } from './server-jobs.js';
+
+const sql = sqldb.loadSqlEquiv(import.meta.url);
 
 /**
  * Check that an assessment_instance_id really belongs to the given course_instance_id
@@ -24,7 +26,7 @@ const sql = sqldb.loadSqlEquiv(__filename);
  * @param assessment_instance_id - The assessment instance to check.
  * @param course_instance_id - The course instance it should belong to.
  */
-export async function checkBelongsAsync(
+export async function checkAssessmentInstanceBelongsToCourseInstance(
   assessment_instance_id: string,
   course_instance_id: string,
 ): Promise<void> {
@@ -35,10 +37,9 @@ export async function checkBelongsAsync(
       IdSchema,
     )) == null
   ) {
-    throw new Error('access denied');
+    throw new HttpStatusError(403, 'Access denied');
   }
 }
-export const checkBelongs = callbackify(checkBelongsAsync);
 
 /**
  * Return the name and UID (email) for every owner of the specified course.
@@ -59,8 +60,8 @@ export async function pullAndUpdateCourse({
   commit_hash,
 }: {
   courseId: string;
-  userId: string;
-  authnUserId: string;
+  userId: string | null;
+  authnUserId: string | null;
   path?: string | null;
   branch?: string | null;
   repository?: string | null;
@@ -68,8 +69,8 @@ export async function pullAndUpdateCourse({
 }): Promise<{ jobSequenceId: string; jobPromise: Promise<void> }> {
   const serverJob = await createServerJob({
     courseId,
-    userId,
-    authnUserId,
+    userId: userId ?? undefined,
+    authnUserId: authnUserId ?? undefined,
     type: 'sync',
     description: 'Pull from remote git repository',
   });
@@ -97,7 +98,7 @@ export async function pullAndUpdateCourse({
     }
 
     const lockName = getLockNameForCoursePath(path);
-    await namedLocks.tryWithLock(
+    await namedLocks.doWithLock(
       lockName,
       {
         timeout: 5000,
@@ -139,8 +140,14 @@ export async function pullAndUpdateCourse({
           job.info('Fetch from remote git repository');
           await job.exec('git', ['fetch'], gitOptions);
 
+          job.info('Restore staged and unstaged changes');
+          await job.exec('git', ['restore', '--staged', '--worktree', '.'], gitOptions);
+
           job.info('Clean local files not in remote git repository');
           await job.exec('git', ['clean', '-fdx'], gitOptions);
+
+          job.info('Check out current branch');
+          await job.exec('git', ['checkout', branch], gitOptions);
 
           job.info('Reset state to remote git repository');
           await job.exec('git', ['reset', '--hard', `origin/${branch}`], gitOptions);
@@ -154,7 +161,7 @@ export async function pullAndUpdateCourse({
         const endGitHash = await getCourseCommitHash(path);
 
         job.info('Sync git repository to database');
-        const syncResult = await syncDiskToSqlWithLock(path, courseId, job);
+        const syncResult = await syncDiskToSqlWithLock(courseId, path, job);
 
         if (config.chunksGenerator) {
           const chunkChanges = await chunks.updateChunksForCourse({

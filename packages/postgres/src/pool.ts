@@ -1,12 +1,13 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { Readable, Transform } from 'node:stream';
+import { callbackify } from 'node:util';
+
+import debugfn from 'debug';
 import _ from 'lodash';
+import multipipe from 'multipipe';
 import pg, { QueryResult } from 'pg';
 import Cursor from 'pg-cursor';
-import debugFactory from 'debug';
-import { callbackify } from 'node:util';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { z } from 'zod';
-import { Readable, Transform } from 'node:stream';
-import multipipe from 'multipipe';
 
 export type QueryParams = Record<string, any> | any[];
 
@@ -15,7 +16,7 @@ export interface CursorIterator<T> {
   stream: (batchSize: number) => NodeJS.ReadWriteStream;
 }
 
-const debug = debugFactory('@prairielearn/postgres');
+const debug = debugfn('@prairielearn/postgres');
 const lastQueryMap = new WeakMap<pg.PoolClient, string>();
 const searchSchemaMap = new WeakMap<pg.PoolClient, string>();
 
@@ -87,9 +88,9 @@ function paramsToArray(
   let paramsArray: any[] = [];
   while ((result = re.exec(remainingSql)) !== null) {
     const v = result[1];
-    if (!_(map).has(v)) {
-      if (!_(params).has(v)) throw new Error(`Missing parameter: ${v}`);
-      if (_.isArray(params[v])) {
+    if (!(v in map)) {
+      if (!(v in params)) throw new Error(`Missing parameter: ${v}`);
+      if (Array.isArray(params[v])) {
         map[v] =
           'ARRAY[' +
           _.map(_.range(nParams + 1, nParams + params[v].length + 1), function (n) {
@@ -134,8 +135,8 @@ function enhanceError(err: Error, sql: string, params: QueryParams): Error {
   sqlError.message = err.message;
 
   return addDataToError(err, {
-    sqlError: sqlError,
-    sql: sql,
+    sqlError,
+    sql,
     sqlParams: params,
   });
 }
@@ -1057,7 +1058,7 @@ export class PostgresPool {
 
     let iterateCalled = false;
     const iterator: CursorIterator<z.infer<Model>> = {
-      iterate: async function* (batchSize: number) {
+      async *iterate(batchSize: number) {
         // Safety check: if someone calls iterate multiple times, they're
         // definitely doing something wrong.
         if (iterateCalled) {
@@ -1088,7 +1089,7 @@ export class PostgresPool {
           }
         }
       },
-      stream: function (batchSize: number) {
+      stream(batchSize: number) {
         const transform = new Transform({
           readableObjectMode: true,
           writableObjectMode: true,

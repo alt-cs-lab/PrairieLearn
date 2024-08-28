@@ -1,14 +1,13 @@
-import * as util from 'util';
+import { setTimeout as sleep } from 'timers/promises';
+
 import { assert } from 'chai';
 import * as cheerio from 'cheerio';
-import fetch from 'node-fetch';
-import { setTimeout as sleep } from 'timers/promises';
-import * as _ from 'lodash';
-import FormData = require('form-data');
+import _ from 'lodash';
+import fetch, { FormData } from 'node-fetch';
 
 import * as sqldb from '@prairielearn/postgres';
 
-const sql = sqldb.loadSqlEquiv(__filename);
+const sql = sqldb.loadSqlEquiv(import.meta.url);
 
 export function waitForJobSequence(locals: Record<string, any>) {
   describe('The job sequence', function () {
@@ -121,6 +120,7 @@ export function getInstanceQuestion(locals: Record<string, any>) {
         return;
       }
       assert.equal(locals.variant?.broken, false);
+      assert.isNull(locals.variant?.broken_at);
     });
 
     it('should have a CSRF token if has grade or save button', function () {
@@ -475,7 +475,7 @@ export function regradeAssessment(locals: Record<string, any>) {
     });
     it('should have a CSRF token', function () {
       assert(locals.$);
-      const elemList = locals.$('form[name="regrade-all-form"] input[name="__csrf_token"]');
+      const elemList = locals.$('#regrade-all-form input[name="__csrf_token"]');
       assert.lengthOf(elemList, 1);
       assert.nestedProperty(elemList[0], 'attribs.value');
       locals.__csrf_token = elemList[0].attribs.value;
@@ -527,10 +527,7 @@ export function uploadInstanceQuestionScores(locals: Record<string, any>) {
       const formData = new FormData();
       formData.append('__action', 'upload_instance_question_scores');
       formData.append('__csrf_token', locals.__csrf_token);
-      formData.append('file', Buffer.from(locals.csvData), {
-        filename: 'data.csv',
-        contentType: 'text/csv',
-      });
+      formData.append('file', new Blob([Buffer.from(locals.csvData)]), 'data.csv');
       assert(locals.instructorAssessmentUploadsUrl);
       const response = await fetch(locals.instructorAssessmentUploadsUrl, {
         method: 'POST',
@@ -571,10 +568,7 @@ export function uploadAssessmentInstanceScores(locals: Record<string, any>) {
       const formData = new FormData();
       formData.append('__action', 'upload_assessment_instance_scores');
       formData.append('__csrf_token', locals.__csrf_token);
-      formData.append('file', Buffer.from(locals.csvData), {
-        filename: 'data.csv',
-        contentType: 'text/csv',
-      });
+      formData.append('file', new Blob([Buffer.from(locals.csvData)]), 'data.csv');
       assert(locals.instructorAssessmentUploadsUrl);
       const response = await fetch(locals.instructorAssessmentUploadsUrl, {
         method: 'POST',
@@ -693,5 +687,3 @@ export async function checkNoIssuesForLastVariantAsync() {
       JSON.stringify(result.rows, null, '    '),
   );
 }
-
-export const checkNoIssuesForLastVariant = util.callbackify(checkNoIssuesForLastVariantAsync);

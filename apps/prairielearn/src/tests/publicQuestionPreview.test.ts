@@ -1,10 +1,13 @@
-import { testQuestionPreviews, testFileDownloads } from './helperQuestionPreview';
-import { config } from '../lib/config';
 import { z } from 'zod';
-import { features } from '../lib/features/index';
+
 import * as sqldb from '@prairielearn/postgres';
-import * as helperServer from './helperServer';
-const sql = sqldb.loadSqlEquiv(__filename);
+
+import { config } from '../lib/config.js';
+import { features } from '../lib/features/index.js';
+
+import { testQuestionPreviews, testFileDownloads } from './helperQuestionPreview.js';
+import * as helperServer from './helperServer.js';
+const sql = sqldb.loadSqlEquiv(import.meta.url);
 
 const siteUrl = 'http://localhost:' + config.serverPort;
 const baseUrl = siteUrl + '/pl';
@@ -67,8 +70,8 @@ describe('Public Question Preview', function () {
 
   describe('Test Question Previews', function () {
     const previewPageInfo = {
-      siteUrl: siteUrl,
-      baseUrl: baseUrl,
+      siteUrl,
+      baseUrl,
       questionBaseUrl: baseUrl + '/public/course/1/question',
       questionPreviewTabUrl: '/preview',
       isStudentPage: false,

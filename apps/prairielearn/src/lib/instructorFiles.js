@@ -1,16 +1,21 @@
 // @ts-check
 import * as path from 'path';
-import { contains } from '@prairielearn/path-utils';
-import { html } from '@prairielearn/html';
+
 import * as error from '@prairielearn/error';
-import { encodePath, decodePath } from './uri-util';
+import { html } from '@prairielearn/html';
+import { contains } from '@prairielearn/path-utils';
+
+import { encodePath, decodePath } from './uri-util.js';
 
 /**
  * For the file path of the current page, this function returns rich
  * information about higher folders up to a certain level determined by
  * the navPage. Created for use in instructor file views.
+ *
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
  */
-export function getPaths(req, res, callback) {
+export function getPaths(req, res) {
   let paths = {
     coursePath: res.locals.course.path,
     courseId: res.locals.course.id,
@@ -59,19 +64,21 @@ export function getPaths(req, res, callback) {
     paths.testsDir = path.join(paths.rootPath, 'tests');
     paths.urlPrefix = `${res.locals.urlPrefix}/question/${res.locals.question.id}`;
   } else {
-    return callback(new Error(`Invalid navPage: ${res.locals.navPage}`));
+    throw new Error(`Invalid navPage: ${res.locals.navPage}`);
   }
 
   if (req.params[0]) {
     try {
       paths.workingPath = path.join(res.locals.course.path, decodePath(req.params[0]));
     } catch (err) {
-      return callback(new Error(`Invalid path: ${req.params[0]}`));
+      throw new Error(`Invalid path: ${req.params[0]}`);
     }
   } else {
     paths.workingPath = paths.rootPath;
   }
   paths.workingPathRelativeToCourse = path.relative(res.locals.course.path, paths.workingPath);
+  paths.workingDirectory = path.dirname(paths.workingPathRelativeToCourse);
+  paths.workingFilename = path.basename(paths.workingPathRelativeToCourse);
 
   if (paths.workingPath === paths.rootPath) {
     paths.specialDirs = [];
@@ -105,9 +112,8 @@ export function getPaths(req, res, callback) {
   }
 
   if (!contains(paths.rootPath, paths.workingPath)) {
-    throw error.makeWithInfo(
-      'Invalid working directory',
-      html`
+    throw new error.AugmentedError('Invalid working directory', {
+      info: html`
         <p>The working directory</p>
         <div class="container">
           <pre class="bg-dark text-white rounded p-2">${paths.workingPath}</pre>
@@ -117,17 +123,16 @@ export function getPaths(req, res, callback) {
           <pre class="bg-dark text-white rounded p-2">${paths.rootPath}</pre>
         </div>
         <p>when looking at <code>${res.locals.navPage}</code> files.</p>
-      `.toString(),
-    );
+      `,
+    });
   }
 
   const found = paths.invalidRootPaths.find((invalidRootPath) =>
     contains(invalidRootPath, paths.workingPath),
   );
   if (found) {
-    throw error.makeWithInfo(
-      'Invalid working directory',
-      html`
+    throw new error.AugmentedError('Invalid working directory', {
+      info: html`
         <p>The working directory</p>
         <div class="container">
           <pre class="bg-dark text-white rounded p-2">${paths.workingPath}</pre>
@@ -135,8 +140,8 @@ export function getPaths(req, res, callback) {
         <p>must <em>not</em> be inside the directory</p>
         <div class="container"><pre class="bg-dark text-white rounded p-2">${found}</pre></div>
         <p>when looking at <code>${res.locals.navPage}</code> files.</p>
-      `.toString(),
-    );
+      `,
+    });
   }
 
   let curPath = res.locals.course.path;
@@ -163,5 +168,5 @@ export function getPaths(req, res, callback) {
       }
     });
 
-  callback(null, paths);
+  return paths;
 }

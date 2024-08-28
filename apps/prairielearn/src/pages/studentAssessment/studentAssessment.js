@@ -1,14 +1,28 @@
-const asyncHandler = require('express-async-handler');
-const express = require('express');
+// @ts-check
+import * as express from 'express';
+import asyncHandler from 'express-async-handler';
+
+import * as error from '@prairielearn/error';
+import { flash } from '@prairielearn/flash';
+import { loadSqlEquiv, queryAsync } from '@prairielearn/postgres';
+
+import { makeAssessmentInstance } from '../../lib/assessment.js';
+import {
+  joinGroup,
+  createGroup,
+  getGroupConfig,
+  getGroupId,
+  getGroupInfo,
+  updateGroupRoles,
+  leaveGroup,
+  GroupOperationError,
+  canUserAssignGroupRoles,
+} from '../../lib/groups.js';
+import { getClientFingerprintId } from '../../middlewares/clientFingerprint.js';
+import { checkPasswordOrRedirect } from '../../middlewares/studentAssessmentAccess.js';
+
 const router = express.Router();
-
-const { checkPasswordOrRedirect } = require('../../middlewares/studentAssessmentAccess');
-const error = require('@prairielearn/error');
-const assessment = require('../../lib/assessment');
-const sqldb = require('@prairielearn/postgres');
-
-const sql = sqldb.loadSqlEquiv(__filename);
-const groupAssessmentHelper = require('../../lib/groups');
+const sql = loadSqlEquiv(import.meta.url);
 
 router.get(
   '/',
@@ -20,8 +34,10 @@ router.get(
     if (res.locals.assessment.multiple_instance) {
       if (res.locals.assessment.type === 'Homework') {
         return next(
-          error.makeWithData('"Homework" assessments do not support multiple instances', {
-            assessment: res.locals.assessment,
+          new error.AugmentedError('"Homework" assessments do not support multiple instances', {
+            data: {
+              assessment: res.locals.assessment,
+            },
           }),
         );
       }
@@ -34,19 +50,16 @@ router.get(
       if (!checkPasswordOrRedirect(req, res)) return;
       if (res.locals.assessment.group_work) {
         // Get the group config info
-        const groupConfig = await groupAssessmentHelper.getGroupConfig(res.locals.assessment.id);
+        const groupConfig = await getGroupConfig(res.locals.assessment.id);
         res.locals.groupConfig = groupConfig;
 
         // Check whether the user is currently in a group in the current assessment by trying to get a group_id
-        const groupId = await groupAssessmentHelper.getGroupId(
-          res.locals.assessment.id,
-          res.locals.user.user_id,
-        );
+        const groupId = await getGroupId(res.locals.assessment.id, res.locals.user.user_id);
 
         if (groupId === null) {
           res.locals.notInGroup = true;
         } else {
-          const groupInfo = await groupAssessmentHelper.getGroupInfo(groupId, groupConfig);
+          const groupInfo = await getGroupInfo(groupId, groupConfig);
           res.locals.groupSize = groupInfo.groupSize;
           res.locals.groupMembers = groupInfo.groupMembers;
           res.locals.joinCode = groupInfo.joinCode;
@@ -54,18 +67,17 @@ router.get(
           res.locals.start = groupInfo.start;
           res.locals.rolesInfo = groupInfo.rolesInfo;
 
-          if (groupConfig.hasRoles) {
-            const result = await groupAssessmentHelper.getAssessmentPermissions(
-              res.locals.assessment.id,
+          if (groupConfig.has_roles) {
+            res.locals.userCanAssignRoles = canUserAssignGroupRoles(
+              groupInfo,
               res.locals.user.user_id,
             );
-            res.locals.canViewRoleTable = result.can_assign_roles_at_start;
           }
         }
       }
-      res.render(__filename.replace(/\.js$/, '.ejs'), res.locals);
+      res.render(import.meta.filename.replace(/\.js$/, '.ejs'), res.locals);
     } else {
-      const result = await sqldb.queryAsync(sql.select_single_assessment_instance, params);
+      const result = await queryAsync(sql.select_single_assessment_instance, params);
       if (result.rowCount === 0) {
         // Before allowing the user to create a new assessment instance, we need
         // to check if the current access rules require a password. If they do,
@@ -75,20 +87,17 @@ router.get(
 
         if (res.locals.assessment.group_work) {
           // Get the group config info
-          const groupConfig = await groupAssessmentHelper.getGroupConfig(res.locals.assessment.id);
+          const groupConfig = await getGroupConfig(res.locals.assessment.id);
           res.locals.groupConfig = groupConfig;
 
           // Check whether the user is currently in a group in the current assessment by trying to get a group_id
-          const groupId = await groupAssessmentHelper.getGroupId(
-            res.locals.assessment.id,
-            res.locals.user.user_id,
-          );
+          const groupId = await getGroupId(res.locals.assessment.id, res.locals.user.user_id);
 
           if (groupId === null) {
             res.locals.notInGroup = true;
           } else {
             res.locals.notInGroup = false;
-            const groupInfo = await groupAssessmentHelper.getGroupInfo(groupId, groupConfig);
+            const groupInfo = await getGroupInfo(groupId, groupConfig);
             res.locals.groupSize = groupInfo.groupSize;
             res.locals.groupMembers = groupInfo.groupMembers;
             res.locals.joinCode = groupInfo.joinCode;
@@ -97,17 +106,17 @@ router.get(
             res.locals.rolesInfo = groupInfo.rolesInfo;
 
             if (groupConfig.has_roles) {
-              const result = await groupAssessmentHelper.getAssessmentPermissions(
-                res.locals.assessment.id,
+              res.locals.userCanAssignRoles = canUserAssignGroupRoles(
+                groupInfo,
                 res.locals.user.user_id,
               );
-              res.locals.canViewRoleTable = result.can_assign_roles_at_start;
             }
           }
-          res.render(__filename.replace(/\.js$/, '.ejs'), res.locals);
+          res.render(import.meta.filename.replace(/\.js$/, '.ejs'), res.locals);
         } else if (res.locals.assessment.type === 'Homework') {
           const time_limit_min = null;
-          const assessment_instance_id = await assessment.makeAssessmentInstance(
+          const client_fingerprint_id = await getClientFingerprintId(req, res);
+          const assessment_instance_id = await makeAssessmentInstance(
             res.locals.assessment.id,
             res.locals.user.user_id,
             res.locals.assessment.group_work,
@@ -115,11 +124,11 @@ router.get(
             res.locals.authz_data.mode,
             time_limit_min,
             res.locals.authz_data.date,
-            res.locals.client_fingerprint_id,
+            client_fingerprint_id,
           );
           res.redirect(res.locals.urlPrefix + '/assessment_instance/' + assessment_instance_id);
         } else {
-          res.render(__filename.replace(/\.js$/, '.ejs'), res.locals);
+          res.render(import.meta.filename.replace(/\.js$/, '.ejs'), res.locals);
         }
       } else {
         res.redirect(res.locals.urlPrefix + '/assessment_instance/' + result.rows[0].id);
@@ -147,9 +156,28 @@ router.post(
       // students to create and start a new assessment instance.
       if (!checkPasswordOrRedirect(req, res)) return;
 
+      if (res.locals.assessment.group_work) {
+        const groupConfig = await getGroupConfig(res.locals.assessment.id);
+        const groupId = await getGroupId(res.locals.assessment.id, res.locals.user.user_id);
+        if (groupId === null) {
+          throw new error.HttpStatusError(
+            403,
+            'Cannot create a new instance while not in a group.',
+          );
+        }
+        const groupInfo = await getGroupInfo(groupId, groupConfig);
+        if (!groupInfo.start) {
+          throw new error.HttpStatusError(
+            403,
+            'Group has invalid composition or role assignment. Cannot start assessment.',
+          );
+        }
+      }
+
       const time_limit_min =
         res.locals.assessment.type === 'Exam' ? res.locals.authz_result.time_limit_min : null;
-      const assessment_instance_id = await assessment.makeAssessmentInstance(
+      const client_fingerprint_id = await getClientFingerprintId(req, res);
+      const assessment_instance_id = await makeAssessmentInstance(
         res.locals.assessment.id,
         res.locals.user.user_id,
         res.locals.assessment.group_work,
@@ -157,49 +185,63 @@ router.post(
         res.locals.authz_data.mode,
         time_limit_min,
         res.locals.req_date,
-        res.locals.client_fingerprint_id,
+        client_fingerprint_id,
       );
       res.redirect(res.locals.urlPrefix + '/assessment_instance/' + assessment_instance_id);
     } else if (req.body.__action === 'join_group') {
-      await groupAssessmentHelper.joinGroup(
+      await joinGroup(
         req.body.join_code,
         res.locals.assessment.id,
-        res.locals.user.user_id,
+        res.locals.user.uid,
         res.locals.authn_user.user_id,
-      );
+      ).catch((err) => {
+        if (err instanceof GroupOperationError) {
+          flash('error', err.message);
+        } else {
+          throw err;
+        }
+      });
       res.redirect(req.originalUrl);
     } else if (req.body.__action === 'create_group') {
-      await groupAssessmentHelper.createGroup(
+      await createGroup(
         req.body.groupName,
         res.locals.assessment.id,
-        res.locals.user.user_id,
+        [res.locals.user.uid],
         res.locals.authn_user.user_id,
-      );
+      ).catch((err) => {
+        if (err instanceof GroupOperationError) {
+          flash('error', err.message);
+        } else {
+          throw err;
+        }
+      });
       res.redirect(req.originalUrl);
     } else if (req.body.__action === 'update_group_roles') {
-      await groupAssessmentHelper.updateGroupRoles(
+      // Check whether the user is currently in a group
+      const groupId = await getGroupId(res.locals.assessment.id, res.locals.user.user_id);
+      if (groupId == null) {
+        throw new error.HttpStatusError(403, 'Cannot change group roles while not in a group.');
+      }
+      await updateGroupRoles(
         req.body,
         res.locals.assessment.id,
+        groupId,
         res.locals.user.user_id,
+        res.locals.authz_data.has_course_instance_permission_edit,
         res.locals.authn_user.user_id,
       );
       res.redirect(req.originalUrl);
     } else if (req.body.__action === 'leave_group') {
-      await groupAssessmentHelper.leaveGroup(
+      await leaveGroup(
         res.locals.assessment.id,
         res.locals.user.user_id,
         res.locals.authn_user.user_id,
       );
       res.redirect(req.originalUrl);
     } else {
-      return next(
-        error.make(400, 'unknown __action', {
-          locals: res.locals,
-          body: req.body,
-        }),
-      );
+      return next(new error.HttpStatusError(400, `unknown __action: ${req.body.__action}`));
     }
   }),
 );
 
-module.exports = router;
+export default router;
