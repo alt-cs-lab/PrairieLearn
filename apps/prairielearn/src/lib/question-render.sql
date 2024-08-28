@@ -30,7 +30,8 @@ SELECT
     coalesce(ci.display_timezone, c.display_timezone)
   ) AS formatted_date,
   u.uid AS user_uid,
-  u.name AS user_name
+  u.name AS user_name,
+  u.email AS user_email
 FROM
   issues AS i
   LEFT JOIN course_instances AS ci ON (ci.id = i.course_instance_id)
@@ -49,6 +50,7 @@ SELECT
   -- submissions in the `select_detailed_submissions` query below.
   s.auth_user_id,
   s.broken,
+  s.client_fingerprint_id,
   s.correct,
   s.credit,
   s.date,
@@ -65,17 +67,11 @@ SELECT
   s.variant_id,
   s.manual_rubric_grading_id,
   to_jsonb(gj) AS grading_job,
-  -- These are separate for historical reasons
-  gj.id AS grading_job_id,
-  grading_job_status (gj.id) AS grading_job_status,
   format_date_full_compact (
     s.date,
     coalesce(ci.display_timezone, c.display_timezone)
   ) AS formatted_date,
-  CASE
-    WHEN s.grading_requested_at IS NOT NULL THEN format_interval ($req_date - s.grading_requested_at)
-    ELSE NULL
-  END AS elapsed_grading_time
+  u.uid AS user_uid
 FROM
   submissions AS s
   JOIN variants AS v ON (v.id = s.variant_id)
@@ -99,6 +95,7 @@ FROM
     LIMIT
       1
   ) AS gj ON TRUE
+  LEFT JOIN users u ON (s.auth_user_id = u.user_id)
 WHERE
   v.id = $variant_id
 ORDER BY
@@ -173,6 +170,7 @@ SELECT
   to_jsonb(s) AS submission,
   to_jsonb(v) AS variant,
   to_jsonb(iq) || to_jsonb(iqnag) AS instance_question,
+  qo.question_number,
   jsonb_build_object(
     'id',
     next_iq.id,
@@ -187,13 +185,11 @@ SELECT
   to_jsonb(ci) AS course_instance,
   to_jsonb(c) AS variant_course,
   to_jsonb(qc) AS question_course,
-  to_jsonb(ci) AS course_instance,
-  lgj.id AS grading_job_id,
-  grading_job_status (lgj.id) AS grading_job_status,
   format_date_full_compact (
     s.date,
     coalesce(ci.display_timezone, c.display_timezone)
   ) AS formatted_date,
+  u.uid AS user_uid,
   (
     SELECT
       count(*)
@@ -226,6 +222,8 @@ FROM
   JOIN pl_courses AS qc ON (qc.id = q.course_id)
   JOIN LATERAL instance_questions_next_allowed_grade (iq.id) AS iqnag ON TRUE
   LEFT JOIN next_iq ON (next_iq.current_id = iq.id)
+  LEFT JOIN users AS u ON (s.auth_user_id = u.user_id)
+  LEFT JOIN question_order (ai.id) AS qo ON (qo.instance_question_id = iq.id)
 WHERE
   s.id = $submission_id
   AND q.id = $question_id
@@ -234,3 +232,68 @@ WHERE
     OR iq.id = $instance_question_id::BIGINT
   )
   AND v.id = $variant_id;
+
+-- BLOCK select_variant_for_render
+SELECT
+  v.*,
+  format_date_full_compact (
+    v.date,
+    COALESCE(ci.display_timezone, c.display_timezone)
+  ) AS formatted_date,
+  to_jsonb(a.*) AS assessment,
+  jsonb_set(
+    to_jsonb(ai.*),
+    '{formatted_date}',
+    to_jsonb(
+      format_date_full_compact (
+        ai.date,
+        COALESCE(ci.display_timezone, c.display_timezone)
+      )
+    )
+  ) AS assessment_instance,
+  jsonb_set(
+    jsonb_set(
+      to_jsonb(iq.*),
+      '{assigned_grader_name}',
+      to_jsonb(COALESCE(agu.name, agu.uid))
+    ),
+    '{last_grader_name}',
+    to_jsonb(COALESCE(lgu.name, lgu.uid))
+  ) AS instance_question
+FROM
+  variants as v
+  LEFT JOIN instance_questions AS iq ON (iq.id = v.instance_question_id)
+  LEFT JOIN assessment_instances AS ai ON (ai.id = iq.assessment_instance_id)
+  LEFT JOIN assessments AS a ON (a.id = ai.assessment_id)
+  LEFT JOIN course_instances AS ci ON (ci.id = v.course_instance_id)
+  JOIN pl_courses AS c ON (c.id = v.course_id)
+  LEFT JOIN users AS agu ON (agu.user_id = iq.assigned_grader)
+  LEFT JOIN users AS lgu ON (lgu.user_id = iq.last_grader)
+WHERE
+  v.id = $variant_id
+  AND v.question_id = $question_id
+  -- instance_question_id is null for question preview, so allow any variant of the question
+  AND (
+    $instance_question_id::bigint IS NULL
+    OR v.instance_question_id = $instance_question_id
+  );
+
+-- BLOCK select_is_shared
+SELECT
+  EXISTS (
+    SELECT
+      *
+    FROM
+      sharing_set_questions
+    WHERE
+      question_id = $question_id
+  )
+  OR EXISTS (
+    SELECT
+      *
+    FROM
+      questions
+    WHERE
+      id = $question_id
+      AND shared_publicly
+  );

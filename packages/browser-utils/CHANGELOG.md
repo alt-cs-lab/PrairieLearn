@@ -1,5 +1,97 @@
 # @prairielearn/browser-utils
 
+## 2.2.0
+
+### Minor Changes
+
+- d7f1045: Add `trapFocus` and `focusFirstFocusbaleChild` functions
+
+## 2.1.3
+
+### Patch Changes
+
+- Updated dependencies [852c2e2]
+  - @prairielearn/html@4.0.5
+
+## 2.1.2
+
+### Patch Changes
+
+- a8438ff: Upgrade all JavaScript dependencies
+- Updated dependencies [a8438ff]
+  - @prairielearn/html@4.0.4
+
+## 2.1.1
+
+### Patch Changes
+
+- 24a93b8: Upgrade all JavaScript dependencies
+- Updated dependencies [24a93b8]
+  - @prairielearn/html@4.0.3
+
+## 2.1.0
+
+### Minor Changes
+
+- d28a15d: Support custom return type for parseHTMLElement
+
+## 2.0.2
+
+### Patch Changes
+
+- Updated dependencies [0f7c90f]
+  - @prairielearn/html@4.0.2
+
+## 2.0.1
+
+### Patch Changes
+
+- 901fce8: Upgrade all JavaScript dependencies
+- Updated dependencies [901fce8]
+  - @prairielearn/html@4.0.1
+
+## 2.0.0
+
+### Major Changes
+
+- 4f30b7e: Publish as native ESM
+
+### Patch Changes
+
+- Updated dependencies [4f30b7e]
+  - @prairielearn/html@4.0.0
+
+## 1.1.14
+
+### Patch Changes
+
+- Updated dependencies [c7e6553]
+  - @prairielearn/html@3.1.7
+
+## 1.1.13
+
+### Patch Changes
+
+- 207602a: Upgrade all JavaScript dependencies
+- Updated dependencies [207602a]
+  - @prairielearn/html@3.1.6
+
+## 1.1.12
+
+### Patch Changes
+
+- 3395c25: Upgrade all JavaScript dependencies
+- Updated dependencies [3395c25]
+  - @prairielearn/html@3.1.5
+
+## 1.1.11
+
+### Patch Changes
+
+- dce0fa3: Upgrade all JavaScript dependencies
+- Updated dependencies [dce0fa3]
+  - @prairielearn/html@3.1.4
+
 ## 1.1.10
 
 ### Patch Changes

@@ -1,15 +1,21 @@
-import express from 'express';
 import { assert } from 'chai';
-import fetch from 'node-fetch';
-import fetchCookie from 'fetch-cookie';
-import { parse as parseSetCookie } from 'set-cookie-parser';
+import express from 'express';
 import asyncHandler from 'express-async-handler';
+import fetchCookie from 'fetch-cookie';
+import fetch from 'node-fetch';
+import setCookie from 'set-cookie-parser';
+
 import { withServer } from '@prairielearn/express-test-utils';
 
-import { createSessionMiddleware } from './index';
-import { MemoryStore } from './memory-store';
+import { MemoryStore } from './memory-store.js';
+
+import { createSessionMiddleware } from './index.js';
 
 const TEST_SECRET = 'test-secret';
+
+function parseSetCookie(header: string) {
+  return setCookie.parse(setCookie.splitCookiesString(header));
+}
 
 describe('session middleware', () => {
   it('sets a session cookie', async () => {
@@ -305,11 +311,14 @@ describe('session middleware', () => {
       const fetchWithCookies = fetchCookie(fetch);
 
       // Generate a new session.
-      await fetchWithCookies(url);
+      const res = await fetchWithCookies(url);
+      assert.equal(res.status, 200);
+      await res.text();
 
       // Destroy the session.
       const destroyRes = await fetchWithCookies(`${url}/destroy`);
       assert.equal(destroyRes.status, 200);
+      await destroyRes.text();
 
       // Ensure the session cookie was cleared in the response.
       const header = destroyRes.headers.get('set-cookie');
@@ -343,7 +352,7 @@ describe('session middleware', () => {
       asyncHandler(async (req, res) => {
         await req.session.regenerate();
         req.session.regenerated = true;
-        res.sendStatus(200);
+        res.send('true');
       }),
     );
 
@@ -364,6 +373,7 @@ describe('session middleware', () => {
       // Regenerate the session.
       res = await fetchWithCookies(`${url}/regenerate`);
       assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'true');
 
       // Ensure that the session cookie was changed.
       header = res.headers.get('set-cookie');
@@ -464,7 +474,7 @@ describe('session middleware', () => {
     );
     app.get('/', (_req, res) => res.sendStatus(200));
     app.get('/extend', (req, res) => {
-      req.session.setExpiration(Date.now() + 10000);
+      req.session.setExpiration(10000);
       res.sendStatus(200);
     });
 
@@ -474,6 +484,7 @@ describe('session middleware', () => {
       // Generate a new session.
       let res = await fetchWithCookies(url);
       assert.equal(res.status, 200);
+      await res.text();
 
       // Grab the original expiration date.
       let header = res.headers.get('set-cookie');
@@ -483,18 +494,17 @@ describe('session middleware', () => {
       const originalExpirationDate = cookies[0].expires;
       assert(originalExpirationDate);
 
-      // Also grab the expiration date from the store.
+      // Grab the session ID from the cookie.
       const sessionId = cookies[0].value.split('.')[0];
-      const session = await store.get(sessionId);
-      assert(session);
-      const originalStoreExpirationDate = session.expiresAt;
 
-      // Ensure that the expiration dates are consistent.
-      assert.equal(originalExpirationDate.getTime(), originalStoreExpirationDate.getTime());
+      // Ensure that the expiration dates are consistent between the cookie and the store.
+      const session = await store.get(sessionId);
+      assert.equal(originalExpirationDate.getTime(), session?.expiresAt.getTime());
 
       // Make another request with the same session.
       res = await fetchWithCookies(`${url}/extend`);
       assert.equal(res.status, 200);
+      await res.text();
 
       // Ensure that the cookie was set again.
       header = res.headers.get('set-cookie');
@@ -507,13 +517,9 @@ describe('session middleware', () => {
       // Ensure that the expiration date was extended.
       assert.notEqual(newExpirationDate.getTime(), originalExpirationDate.getTime());
 
-      // Also grab the new expiration date from the store.
+      // Ensure that the expiration dates are consistent between the cookie and the store.
       const newSession = await store.get(sessionId);
-      assert(newSession);
-      const newStoreExpirationDate = newSession.expiresAt;
-
-      // Ensure that the expiration dates are consistent.
-      assert.equal(newExpirationDate.getTime(), newStoreExpirationDate.getTime());
+      assert.equal(newExpirationDate.getTime(), newSession?.expiresAt.getTime());
     });
   });
 
@@ -541,6 +547,7 @@ describe('session middleware', () => {
       // Generate a new session.
       let res = await fetchWithCookies(url);
       assert.equal(res.status, 200);
+      await res.text();
 
       // Ensure the session was persisted.
       assert.equal(setCount, 1);
@@ -548,6 +555,7 @@ describe('session middleware', () => {
       // Make another request with the same session.
       res = await fetchWithCookies(url);
       assert.equal(res.status, 200);
+      await res.text();
 
       // Ensure the session was not persisted.
       assert.equal(setCount, 1);
@@ -578,7 +586,9 @@ describe('session middleware', () => {
         store,
         secret: TEST_SECRET,
         cookie: {
-          name: ['session', 'legacy_session'],
+          name: 'legacy_session',
+          writeNames: ['legacy_session', 'session'],
+          writeOverrides: [{ domain: undefined }, { domain: '.example.com' }],
         },
       }),
     );
@@ -604,8 +614,11 @@ describe('session middleware', () => {
       const header = res.headers.get('set-cookie');
       assert.isNotNull(header);
       const cookies = parseSetCookie(header ?? '');
-      assert.equal(cookies.length, 1);
-      assert.equal(cookies[0].name, 'session');
+      assert.equal(cookies.length, 2);
+      assert.equal(cookies[0].name, 'legacy_session');
+      assert.isUndefined(cookies[0].domain);
+      assert.equal(cookies[1].name, 'session');
+      assert.equal(cookies[1].domain, '.example.com');
 
       // Ensure that the legacy session is migrated to a new session.
       assert.equal(newSessionId, legacySessionId);

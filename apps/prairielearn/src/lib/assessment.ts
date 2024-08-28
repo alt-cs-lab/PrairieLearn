@@ -1,25 +1,25 @@
 import * as async from 'async';
-import * as ejs from 'ejs';
-import * as path from 'path';
 import debugfn from 'debug';
+import * as ejs from 'ejs';
 import { z } from 'zod';
-import { callbackify, promisify } from 'util';
 
 import * as error from '@prairielearn/error';
-import { gradeVariantAsync } from './grading';
 import * as sqldb from '@prairielearn/postgres';
-import * as ltiOutcomes from './ltiOutcomes';
-import { createServerJob } from './server-jobs';
+
 import {
   CourseSchema,
   IdSchema,
   QuestionSchema,
   VariantSchema,
   ClientFingerprintSchema,
-} from './db-types';
+  AssessmentInstanceSchema,
+} from './db-types.js';
+import { gradeVariant } from './grading.js';
+import * as ltiOutcomes from './ltiOutcomes.js';
+import { createServerJob } from './server-jobs.js';
 
-const debug = debugfn('prairielearn:' + path.basename(__filename, '.js'));
-const sql = sqldb.loadSqlEquiv(__filename);
+const debug = debugfn('prairielearn:assessment');
+const sql = sqldb.loadSqlEquiv(import.meta.url);
 
 export const InstanceLogSchema = z.object({
   event_name: z.string(),
@@ -40,7 +40,7 @@ export const InstanceLogSchema = z.object({
   student_question_number: z.string().nullable(),
   instructor_question_number: z.string().nullable(),
 });
-type InstanceLogEntry = z.infer<typeof InstanceLogSchema>;
+export type InstanceLogEntry = z.infer<typeof InstanceLogSchema>;
 
 /**
  * Check that an assessment_instance_id really belongs to the given assessment_id
@@ -49,7 +49,7 @@ type InstanceLogEntry = z.infer<typeof InstanceLogSchema>;
  * @param assessment_id - The assessment it should belong to.
  * @returns Throws an error if the assessment instance doesn't belong to the assessment.
  */
-export async function checkBelongsAsync(
+export async function checkBelongs(
   assessment_instance_id: string,
   assessment_id: string,
 ): Promise<void> {
@@ -60,10 +60,9 @@ export async function checkBelongsAsync(
       IdSchema,
     )) == null
   ) {
-    throw error.make(403, 'access denied');
+    throw new error.HttpStatusError(403, 'access denied');
   }
 }
-export const checkBelongs = callbackify(checkBelongsAsync);
 
 /**
  * Render the "text" property of an assessment.
@@ -108,6 +107,7 @@ export async function makeAssessmentInstance(
   mode: 'Exam' | 'Homework',
   time_limit_min: number | null,
   date: Date,
+  client_fingerprint_id: string | null,
 ): Promise<string> {
   const result = await sqldb.callOneRowAsync('assessment_instances_insert', [
     assessment_id,
@@ -117,6 +117,7 @@ export async function makeAssessmentInstance(
     mode,
     time_limit_min,
     date,
+    client_fingerprint_id,
   ]);
   return result.rows[0].assessment_instance_id;
 }
@@ -126,15 +127,16 @@ export async function makeAssessmentInstance(
  *
  * @param assessment_instance_id - The assessment instance to grade.
  * @param authn_user_id - The current authenticated user.
+ * @param recomputeGrades - Whether to recompute the grades after adding the questions. Should only be false when the caller takes responsibility for grading the assessment instance later.
  * @returns Whether the assessment instance was updated.
  */
-export async function update(
+export async function updateAssessmentInstance(
   assessment_instance_id: string,
   authn_user_id: string,
+  recomputeGrades = true,
 ): Promise<boolean> {
   debug('update()');
   const updated = await sqldb.runInTransactionAsync(async () => {
-    await sqldb.callAsync('assessment_instances_lock', [assessment_instance_id]);
     const updateResult = await sqldb.callOneRowAsync('assessment_instances_update', [
       assessment_instance_id,
       authn_user_id,
@@ -142,20 +144,22 @@ export async function update(
     if (!updateResult.rows[0].updated) return false; // skip if not updated
 
     // if updated, regrade to pick up max_points changes, etc.
-    await sqldb.callOneRowAsync('assessment_instances_grade', [
-      assessment_instance_id,
-      authn_user_id,
-      null, // credit
-      true, // only_log_if_score_updated
-    ]);
+    if (recomputeGrades) {
+      await sqldb.callOneRowAsync('assessment_instances_grade', [
+        assessment_instance_id,
+        authn_user_id,
+        null, // credit
+        true, // only_log_if_score_updated
+      ]);
+    }
     return true;
   });
   // Don't try to update LTI score if the assessment wasn't updated.
-  if (updated) {
+  if (updated && recomputeGrades) {
     // NOTE: It's important that this is run outside of `runInTransaction`
     // above. This will hit the network, and as a rule we don't do any
     // potentially long-running work inside of a transaction.
-    await promisify(ltiOutcomes.updateScore)(assessment_instance_id);
+    await ltiOutcomes.updateScore(assessment_instance_id);
   }
   return updated;
 }
@@ -173,20 +177,30 @@ export async function update(
  * @param close - Whether to close the assessment instance after grading.
  * @param overrideGradeRate - Whether to override grade rate limits.
  */
-export async function gradeAssessmentInstanceAsync(
+export async function gradeAssessmentInstance(
   assessment_instance_id: string,
   authn_user_id: string | null,
   requireOpen: boolean,
   close: boolean,
   overrideGradeRate: boolean,
+  client_fingerprint_id: string | null,
 ): Promise<void> {
   debug('gradeAssessmentInstance()');
   overrideGradeRate = close || overrideGradeRate;
 
   if (requireOpen || close) {
     await sqldb.runInTransactionAsync(async () => {
-      await sqldb.callAsync('assessment_instances_lock', [assessment_instance_id]);
-      await sqldb.callAsync('assessment_instances_ensure_open', [assessment_instance_id]);
+      const assessmentInstance = await sqldb.queryOptionalRow(
+        sql.select_and_lock_assessment_instance,
+        { assessment_instance_id },
+        AssessmentInstanceSchema,
+      );
+      if (assessmentInstance == null) {
+        throw new error.HttpStatusError(404, 'Assessment instance not found');
+      }
+      if (!assessmentInstance.open) {
+        throw new error.HttpStatusError(403, 'Assessment instance is not open');
+      }
 
       if (close) {
         // If we're supposed to close the assessment, do it *before* we
@@ -195,6 +209,7 @@ export async function gradeAssessmentInstanceAsync(
         await sqldb.queryAsync(sql.close_assessment_instance, {
           assessment_instance_id,
           authn_user_id,
+          client_fingerprint_id,
         });
       }
     });
@@ -209,7 +224,7 @@ export async function gradeAssessmentInstanceAsync(
   await async.eachSeries(variants, async (row) => {
     debug('gradeAssessmentInstance()', 'loop', 'variant.id:', row.variant.id);
     const check_submission_id = null;
-    await gradeVariantAsync(
+    await gradeVariant(
       row.variant,
       check_submission_id,
       row.question,
@@ -236,7 +251,6 @@ export async function gradeAssessmentInstanceAsync(
   // that's acceptable.
   await sqldb.queryAsync(sql.unset_grading_needed, { assessment_instance_id });
 }
-export const gradeAssessmentInstance = callbackify(gradeAssessmentInstanceAsync);
 
 const AssessmentInfoSchema = z.object({
   assessment_label: z.string(),
@@ -296,12 +310,13 @@ export async function gradeAllAssessmentInstances(
     await async.eachSeries(instances, async (row) => {
       job.info(`Grading assessment instance #${row.instance_number} for ${row.username}`);
       const requireOpen = true;
-      await gradeAssessmentInstanceAsync(
+      await gradeAssessmentInstance(
         row.assessment_instance_id,
         authn_user_id,
         requireOpen,
         close,
         overrideGradeRate,
+        null,
       );
     });
   });
@@ -355,12 +370,12 @@ export async function updateAssessmentInstanceScore(
   authn_user_id: string,
 ): Promise<void> {
   await sqldb.runInTransactionAsync(async () => {
-    const max_points = await sqldb.queryRow(
-      sql.select_and_lock_assessment_instance_max_points,
+    const { max_points } = await sqldb.queryRow(
+      sql.select_and_lock_assessment_instance,
       { assessment_instance_id },
-      z.number(),
+      AssessmentInstanceSchema,
     );
-    const points = (score_perc * max_points) / 100;
+    const points = (score_perc * (max_points ?? 0)) / 100;
     await sqldb.queryAsync(sql.update_assessment_instance_score, {
       assessment_instance_id,
       score_perc,
@@ -376,12 +391,12 @@ export async function updateAssessmentInstancePoints(
   authn_user_id: string,
 ): Promise<void> {
   await sqldb.runInTransactionAsync(async () => {
-    const max_points = await sqldb.queryRow(
-      sql.select_and_lock_assessment_instance_max_points,
+    const { max_points } = await sqldb.queryRow(
+      sql.select_and_lock_assessment_instance,
       { assessment_instance_id },
-      z.number(),
+      AssessmentInstanceSchema,
     );
-    const score_perc = (points / (max_points > 0 ? max_points : 1)) * 100;
+    const score_perc = (points / (max_points != null && max_points > 0 ? max_points : 1)) * 100;
     await sqldb.queryAsync(sql.update_assessment_instance_score, {
       assessment_instance_id,
       score_perc,
@@ -430,5 +445,100 @@ export async function selectAssessmentInstanceLogCursor(
     sql.assessment_instance_log,
     { assessment_instance_id, include_files },
     InstanceLogSchema,
+  );
+}
+
+export async function updateAssessmentQuestionStats(assessment_question_id: string): Promise<void> {
+  await sqldb.queryAsync(sql.calculate_stats_for_assessment_question, { assessment_question_id });
+}
+
+export async function updateAssessmentQuestionStatsForAssessment(
+  assessment_id: string,
+): Promise<void> {
+  await sqldb.runInTransactionAsync(async () => {
+    const assessment_questions = await sqldb.queryRows(
+      sql.select_assessment_questions,
+      { assessment_id },
+      IdSchema,
+    );
+    await async.eachLimit(assessment_questions, 3, updateAssessmentQuestionStats);
+    await sqldb.queryAsync(sql.update_assessment_stats_last_updated, { assessment_id });
+  });
+}
+
+export async function deleteAssessmentInstance(
+  assessment_id: string,
+  assessment_instance_id: string,
+  authn_user_id: string,
+): Promise<void> {
+  const deleted_id = await sqldb.queryOptionalRow(
+    sql.delete_assessment_instance,
+    { assessment_id, assessment_instance_id, authn_user_id },
+    IdSchema,
+  );
+  if (deleted_id == null) {
+    throw new error.HttpStatusError(
+      403,
+      'This assessment instance does not exist in this assessment.',
+    );
+  }
+}
+
+export async function deleteAllAssessmentInstancesForAssessment(
+  assessment_id: string,
+  authn_user_id: string,
+): Promise<void> {
+  await sqldb.queryAsync(sql.delete_all_assessment_instances_for_assessment, {
+    assessment_id,
+    authn_user_id,
+  });
+}
+
+/**
+ * This is used to conditionally display/permit a shortcut to delete the
+ * assessment instance. Usually, the only way to delete an assessment instance
+ * is from the "Students" tab of an assessment. However, when a staff member is
+ * iterating on or testing an assessment, it can be tedious to constantly go
+ * back to that page to delete the instance in order to recreate it.
+ *
+ * The shortcut is a "Regenerate assessment instance" button on the assessment
+ * instance page and instance question page. It's only displayed if the user
+ * has the necessary permissions: either "Previewer" or above access on the
+ * course, or "Student Data Viewer" or above access on the course instance.
+ * We're deliberately permissive with these permissions to allow "untrusted"
+ * course staff to e.g. perform quality control on assessments.
+ *
+ * We have an extra check: the instance must have been created by a user that
+ * was an instructor at the time of creation. This addresses the case where
+ * some user was an enrolled student in course instance X and was later added
+ * as course staff to course instance Y. In this case, the user should not be
+ * able to delete their old assessment instances in course instance X. This
+ * check is performed with the `assessment_instances.include_in_statistics`
+ * column, which reflects whether or not the user was an instructor at the time
+ * of creation. We'll rename this column to something more general, e.g.
+ * `created_by_instructor`, in a future migration.
+ *
+ * There's one exception to the above check: the example course, where
+ * `include_in_statistics` is generally `false` even when instructors create
+ * assessment instances; this is because the example course has weird implicit
+ * permissions.
+ *
+ * Note that we check for `authn_` permissions specifically. This ensures that
+ * the menu appears for both "student view" and "student view without access
+ * restrictions".
+ *
+ * @returns {boolean} Whether or not the user should be allowed to delete the assessment instance.
+ */
+export function canDeleteAssessmentInstance(resLocals): boolean {
+  return (
+    // Check for permissions.
+    (resLocals.authz_data.authn_has_course_permission_preview ||
+      resLocals.authz_data.authn_has_course_instance_permission_view) &&
+    // Check that the assessment instance belongs to this user, or that the
+    // user belongs to the group that created the assessment instance.
+    resLocals.authz_result.authorized_edit &&
+    // Check that the assessment instance was created by an instructor; bypass
+    // this check if the course is an example course.
+    (!resLocals.assessment_instance.include_in_statistics || resLocals.course.example_course)
   );
 }

@@ -1,11 +1,13 @@
 import { z } from 'zod';
+
 import { html } from '@prairielearn/html';
 import { renderEjs } from '@prairielearn/html-ejs';
 
-import { IdSchema, Institution, User } from '../../lib/db-types';
-import { type Purchase } from '../../ee/lib/billing/purchases';
-import { isEnterprise } from '../../lib/license';
-import { UserSettingsPurchasesCard } from '../../ee/lib/billing/components/UserSettingsPurchasesCard.html';
+import { HeadContents } from '../../components/HeadContents.html.js';
+import { UserSettingsPurchasesCard } from '../../ee/lib/billing/components/UserSettingsPurchasesCard.html.js';
+import { type Purchase } from '../../ee/lib/billing/purchases.js';
+import { IdSchema, Institution, User } from '../../lib/db-types.js';
+import { isEnterprise } from '../../lib/license.js';
 
 export const AccessTokenSchema = z.object({
   created_at: z.string(),
@@ -24,6 +26,7 @@ export function UserSettings({
   accessTokens,
   newAccessTokens,
   purchases,
+  isExamMode,
   resLocals,
 }: {
   authn_user: User;
@@ -32,21 +35,17 @@ export function UserSettings({
   accessTokens: AccessToken[];
   newAccessTokens: string[];
   purchases: Purchase[];
+  isExamMode: boolean;
   resLocals: Record<string, any>;
 }) {
   return html`
     <!doctype html>
     <html lang="en">
       <head>
-        ${renderEjs(__filename, "<%- include('../../pages/partials/head') %>", resLocals)}
+        ${HeadContents({ resLocals, pageTitle: 'User Settings' })}
       </head>
       <body>
-        <script>
-          $(function () {
-            $('[data-toggle="popover"]').popover({ sanitize: false });
-          });
-        </script>
-        ${renderEjs(__filename, "<%- include('../../pages/partials/navbar') %>", {
+        ${renderEjs(import.meta.url, "<%- include('../../pages/partials/navbar') %>", {
           ...resLocals,
           navPage: 'user_settings',
         })}
@@ -54,21 +53,28 @@ export function UserSettings({
           <h1 class="mb-4">Settings</h1>
           <div class="card mb-4">
             <div class="card-header bg-primary text-white d-flex align-items-center">
-              User profile
+              <h2>User profile</h2>
             </div>
-            <table class="table table-sm two-column-description">
+            <table
+              class="table table-sm two-column-description"
+              aria-label="User profile information"
+            >
               <tbody>
                 <tr>
-                  <th>User ID (UID)</th>
+                  <th>UID</th>
                   <td>${authn_user.uid}</td>
                 </tr>
                 <tr>
-                  <th>User Name</th>
+                  <th>Name</th>
                   <td>${authn_user.name}</td>
                 </tr>
                 <tr>
                   <th>Unique Identifier (UIN)</th>
                   <td>${authn_user.uin}</td>
+                </tr>
+                <tr>
+                  <th>Email</th>
+                  <td>${authn_user.email}</td>
                 </tr>
                 <tr>
                   <th>Institution</th>
@@ -85,7 +91,9 @@ export function UserSettings({
           ${isEnterprise() ? UserSettingsPurchasesCard({ purchases }) : ''}
 
           <div class="card mb-4">
-            <div class="card-header bg-primary text-white d-flex">Browser configuration</div>
+            <div class="card-header bg-primary text-white d-flex">
+              <h2>Browser configuration</h2>
+            </div>
             <div class="card-body">
               <p>
                 This section will let you reset browser settings related to technology inside
@@ -96,45 +104,43 @@ export function UserSettings({
                 <strong>$ x = rac {-b pm sqrt {b^2 - 4ac}}{2a} $</strong>
                 resetting the MathJax menu settings might help.
               </p>
-              <p>
-                <button
-                  class="btn btn-md btn-info"
-                  onClick="localStorage.removeItem('MathJax-Menu-Settings');alert('MathJax menu settings have been reset');"
-                >
-                  Reset MathJax menu settings
-                </button>
-              </p>
+              <button
+                class="btn btn-md btn-info"
+                onClick="localStorage.removeItem('MathJax-Menu-Settings');alert('MathJax menu settings have been reset');"
+              >
+                Reset MathJax menu settings
+              </button>
             </div>
           </div>
 
           <div class="card mb-4">
             <div class="card-header bg-primary text-white d-flex align-items-center">
-              Personal access tokens
-              <button
-                id="generateTokenButton"
-                type="button"
-                class="btn btn-light btn-sm ml-auto"
-                data-toggle="popover"
-                data-container="body"
-                data-html="true"
-                data-placement="auto"
-                title="Generate new token"
-                data-content="${TokenGenerateForm({
-                  id: 'generateTokenButton',
-                  csrfToken: resLocals.__csrf_token,
-                }).toString()}"
-                data-trigger="manual"
-                onclick="$(this).popover('show')"
-              >
-                <i class="fa fa-plus" aria-hidden="true"></i>
-                <span class="d-none d-sm-inline">Generate new token</span>
-              </button>
-            </div>
-            <div class="card-body">
-              <p class="mb-0">You can generate tokens in order to access the PrairieLearn API.</p>
-              ${newAccessTokens.length > 0
+              <h2>Personal access tokens</h2>
+              ${!isExamMode
                 ? html`
-                    <div class="alert alert-primary mt-3" role="alert">
+                    <button
+                      type="button"
+                      class="btn btn-light btn-sm ml-auto"
+                      data-toggle="popover"
+                      data-container="body"
+                      data-html="true"
+                      data-placement="auto"
+                      title="Generate new token"
+                      data-content="${TokenGenerateForm({
+                        csrfToken: resLocals.__csrf_token,
+                      }).toString()}"
+                      data-testid="generate-token-button"
+                    >
+                      <i class="fa fa-plus" aria-hidden="true"></i>
+                      <span class="d-none d-sm-inline">Generate new token</span>
+                    </button>
+                  `
+                : ''}
+            </div>
+            ${newAccessTokens.length > 0
+              ? html`
+                  <div class="card-body">
+                    <div class="alert alert-primary" role="alert">
                       New access token created! Be sure to copy it now, as you won't be able to see
                       it later.
                     </div>
@@ -145,51 +151,20 @@ export function UserSettings({
                         </div>
                       `,
                     )}
-                  `
-                : ''}
-            </div>
+                  </div>
+                `
+              : ''}
             <ul class="list-group list-group-flush">
-              ${accessTokens.length === 0
-                ? html`
-                    <li class="list-group-item">
-                      <span class="text-muted"> You don't currently have any access tokens. </span>
-                    </li>
-                  `
-                : accessTokens.map(
-                    (token) => html`
-                      <li class="list-group-item d-flex align-items-center">
-                        <div class="d-flex flex-column mr-3">
-                          <strong>${token.name}</strong>
-                          <span class="text-muted">Created at ${token.created_at}</span>
-                          <span class="text-muted">
-                            ${token.last_used_at !== null
-                              ? html`Last used at ${token.last_used_at}`
-                              : 'Never used'}
-                          </span>
-                        </div>
-                        <button
-                          id="deleteTokenButton${token.id}"
-                          type="button"
-                          class="btn btn-outline-danger btn-sm ml-auto"
-                          data-toggle="popover"
-                          data-container="body"
-                          data-html="true"
-                          data-placement="auto"
-                          title="Delete this token"
-                          data-content="${TokenDeleteForm({
-                            id: `deleteTokenButton${token.id}`,
-                            token_id: token.id,
-                            csrfToken: resLocals.__csrf_token,
-                          }).toString()}"
-                          data-trigger="manual"
-                          onclick="$(this).popover('show')"
-                        >
-                          Delete
-                        </button>
-                      </li>
-                    `,
-                  )}
+              ${TokenList({
+                accessTokens,
+                isExamMode,
+                resLocals,
+              })}
             </ul>
+
+            <div class="card-footer small">
+              Access tokens can be used to access the PrairieLearn API. Be sure to keep them secure.
+            </div>
           </div>
         </main>
       </body>
@@ -197,7 +172,62 @@ export function UserSettings({
   `.toString();
 }
 
-function TokenGenerateForm({ id, csrfToken }: { id: string; csrfToken: string }) {
+function TokenList({
+  accessTokens,
+  isExamMode,
+  resLocals,
+}: {
+  accessTokens: AccessToken[];
+  isExamMode: boolean;
+  resLocals: Record<string, any>;
+}) {
+  if (isExamMode) {
+    return html`
+      <li class="list-group-item">
+        <span class="text-muted">Access tokens are not available in exam mode.</span>
+      </li>
+    `;
+  }
+
+  if (accessTokens.length === 0) {
+    return html`
+      <li class="list-group-item">
+        <span class="text-muted"> You don't currently have any access tokens. </span>
+      </li>
+    `;
+  }
+
+  return accessTokens.map(
+    (token) => html`
+      <li class="list-group-item d-flex align-items-center">
+        <div class="d-flex flex-column mr-3">
+          <strong>${token.name}</strong>
+          <span class="text-muted">Created at ${token.created_at}</span>
+          <span class="text-muted">
+            ${token.last_used_at !== null ? html`Last used at ${token.last_used_at}` : 'Never used'}
+          </span>
+        </div>
+        <button
+          type="button"
+          class="btn btn-outline-danger btn-sm ml-auto"
+          data-toggle="popover"
+          data-container="body"
+          data-html="true"
+          data-placement="auto"
+          title="Delete this token"
+          data-content="${TokenDeleteForm({
+            token_id: token.id,
+            csrfToken: resLocals.__csrf_token,
+          }).toString()}"
+        >
+          Delete
+        </button>
+      </li>
+    `,
+  );
+}
+
+function TokenGenerateForm({ csrfToken }: { csrfToken: string }) {
   return html`
     <form name="generate-token-form" method="post">
       <input type="hidden" name="__action" value="token_generate" />
@@ -210,27 +240,18 @@ function TokenGenerateForm({ id, csrfToken }: { id: string; csrfToken: string })
           id="token_name"
           name="token_name"
           placeholder="My token"
+          autocomplete="off"
         />
       </div>
       <div class="text-right">
-        <button type="button" class="btn btn-secondary" onclick="$('#${id}').popover('hide')">
-          Cancel
-        </button>
+        <button type="button" class="btn btn-secondary" data-dismiss="popover">Cancel</button>
         <button type="submit" class="btn btn-primary">Generate token</button>
       </div>
     </form>
   `;
 }
 
-function TokenDeleteForm({
-  token_id,
-  id,
-  csrfToken,
-}: {
-  token_id: string;
-  id: string;
-  csrfToken: string;
-}) {
+function TokenDeleteForm({ token_id, csrfToken }: { token_id: string; csrfToken: string }) {
   return html`
     <form name="token-delete-form" method="POST">
       <input type="hidden" name="__action" value="token_delete" />
@@ -241,9 +262,7 @@ function TokenDeleteForm({
         API. You cannot undo this action.
       </p>
       <div class="text-right">
-        <button type="button" class="btn btn-secondary" onclick="$('#${id}').popover('hide')">
-          Cancel
-        </button>
+        <button type="button" class="btn btn-secondary" data-dismiss="popover">Cancel</button>
         <button type="submit" class="btn btn-danger">Delete token</button>
       </div>
     </form>

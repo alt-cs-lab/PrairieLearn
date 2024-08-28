@@ -1,10 +1,13 @@
 import { z } from 'zod';
+
 import { html } from '@prairielearn/html';
 import { renderEjs } from '@prairielearn/html-ejs';
-import { isEnterprise } from '../../lib/license';
-import { InstitutionSchema } from '../../lib/db-types';
-import { type Timezone } from '../../lib/timezones';
-import { Modal } from '../../components/Modal.html';
+
+import { HeadContents } from '../../components/HeadContents.html.js';
+import { Modal } from '../../components/Modal.html.js';
+import { InstitutionSchema } from '../../lib/db-types.js';
+import { isEnterprise } from '../../lib/license.js';
+import { type Timezone, formatTimezone } from '../../lib/timezones.js';
 
 export const InstitutionRowSchema = z.object({
   institution: InstitutionSchema,
@@ -25,18 +28,10 @@ export function AdministratorInstitutions({
     <!doctype html>
     <html lang="en">
       <head>
-        ${renderEjs(__filename, "<%- include('../partials/head'); %>", {
-          ...resLocals,
-          pageTitle: 'Institutions',
-        })}
+        ${HeadContents({ resLocals, pageTitle: 'Institutions' })}
       </head>
       <body>
-        <script>
-          $(function () {
-            $('[data-toggle="popover"]').popover({ sanitize: false });
-          });
-        </script>
-        ${renderEjs(__filename, "<%- include('../partials/navbar'); %>", {
+        ${renderEjs(import.meta.url, "<%- include('../partials/navbar'); %>", {
           ...resLocals,
           navPage: 'admin',
           navSubPage: 'institutions',
@@ -44,7 +39,7 @@ export function AdministratorInstitutions({
         <main id="content" class="container-fluid">
           <div id="institutions" class="card mb-4">
             <div class="card-header bg-primary text-white d-flex align-items-center">
-              Institutions
+              <h1>Institutions</h1>
               <button
                 type="button"
                 class="btn btn-sm btn-light ml-auto"
@@ -90,19 +85,11 @@ export function AdministratorInstitutions({
                 </div>
                 <div class="form-group">
                   <label for="display_timezone">Timezone</label>
-                  <select class="form-control" id="display_timezone" name="display_timezone">
+                  <select class="custom-select" id="display_timezone" name="display_timezone">
                     <option value="" selected disabled hidden>Timezone</option>
                     ${availableTimezones.map(
                       (tz, i) => html`
-                        <option value="${tz.name}" id="timezone-${i}">
-                          ${`${tz.utc_offset.hours ? tz.utc_offset.hours : '00'}:${
-                            tz.utc_offset.minutes
-                              ? tz.utc_offset.minutes > 0
-                                ? tz.utc_offset.minutes
-                                : tz.utc_offset.minutes * -1
-                              : '00'
-                          } ${tz.name}`}
-                        </option>
+                        <option value="${tz.name}" id="timezone-${i}">${formatTimezone(tz)}</option>
                       `,
                     )}
                   </select>
@@ -131,19 +118,12 @@ export function AdministratorInstitutions({
                 </div>
               `,
               footer: html`
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  data-dismiss="modal"
-                  onclick="$('#add-institution-modal').modal('hide')"
-                >
-                  Cancel
-                </button>
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
                 <button type="submit" class="btn btn-primary">Add institution</button>
               `,
             })}
             <div class="table-responsive">
-              <table class="table table-sm table-hover table-striped">
+              <table class="table table-sm table-hover table-striped" aria-label="Institutions">
                 <thead>
                   <tr>
                     <th>Short name</th>
@@ -160,7 +140,7 @@ export function AdministratorInstitutions({
                         <td>
                           ${isEnterprise()
                             ? html`
-                                <a href="/pl/institution/${institution.id}/admin">
+                                <a href="/pl/administrator/institution/${institution.id}">
                                   ${institution.short_name}
                                 </a>
                               `

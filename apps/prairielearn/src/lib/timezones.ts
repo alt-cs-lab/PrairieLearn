@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-import { loadSqlEquiv, queryValidatedRows } from '@prairielearn/postgres';
+import { loadSqlEquiv, queryRows } from '@prairielearn/postgres';
 
-const sql = loadSqlEquiv(__filename);
+const sql = loadSqlEquiv(import.meta.url);
 
 export const TimezoneCodec = z.object({
   name: z.string(),
@@ -14,7 +14,7 @@ let memoizedAvailableTimezones: Timezone[] | null = null;
 let memoizedAvailableTimezonesByName: Map<string, Timezone> | null = null;
 
 async function getAvailableTimezonesFromDB(): Promise<Timezone[]> {
-  const availableTimezones = await queryValidatedRows(sql.select_timezones, [], TimezoneCodec);
+  const availableTimezones = await queryRows(sql.select_timezones, [], TimezoneCodec);
   return availableTimezones;
 }
 
@@ -40,4 +40,15 @@ export async function getTimezoneByName(name: string): Promise<Timezone> {
     throw new Error(`Timezone "${name}" not found`);
   }
   return timezone;
+}
+
+export function formatTimezone(tz: Timezone): string {
+  return `(UTC
+    ${`${tz.utc_offset.hours ? tz.utc_offset.hours : '00'}:${
+      tz.utc_offset.minutes
+        ? tz.utc_offset.minutes > 0
+          ? tz.utc_offset.minutes
+          : tz.utc_offset.minutes * -1
+        : '00'
+    }) ${tz.name}`} `;
 }

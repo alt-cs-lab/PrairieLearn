@@ -1,4 +1,5 @@
 import { z } from 'zod';
+
 import {
   ConfigLoader,
   makeFileConfigSource,
@@ -13,6 +14,8 @@ const ConfigSchema = z.object({
   postgresqlHost: z.string().default('localhost'),
   postgresqlPoolSize: z.number().default(100),
   postgresqlIdleTimeoutMillis: z.number().default(30_000),
+  cacheType: z.enum(['none', 'redis', 'memory']).default('none'),
+  cacheKeyPrefix: z.string().default('workspace-host-cache:'),
   redisUrl: z.string().optional().default('redis://localhost:6379/'),
   runningInEc2: z.boolean().default(false),
   cacheImageRegistry: z.string().nullable().default(null),
@@ -55,7 +58,10 @@ const ConfigSchema = z.object({
   workspaceMaxGradedFilesCount: z.number().default(100),
   /** Controls the maximum size of all graded files in bytes. */
   workspaceMaxGradedFilesSize: z.number().default(100 * 1024 * 1024),
-  workspaceLogsS3Bucket: z.string().nullable().default(null),
+  workspaceLogsS3Bucket: z
+    .string()
+    .nullable()
+    .default(process.env.NODE_ENV !== 'production' ? 'workspace-logs' : null),
   /**
    * How long to wait for a workspace container to start. If the container
    * doesn't complete a health check within this period, it is marked as

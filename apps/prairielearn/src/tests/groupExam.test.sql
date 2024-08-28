@@ -17,19 +17,6 @@ WHERE
   assessment_id = $assessment_id
   AND deleted_at IS NULL;
 
--- BLOCK generate_and_enroll_3_users
-SELECT
-  user_id,
-  uid,
-  name,
-  uin
-FROM
-  users_randomly_generate (3, 1)
-  LEFT JOIN course_instances AS ci on (ci.id = 1)
-  LEFT JOIN pl_courses AS c ON (c.id = ci.course_id)
-ORDER BY
-  user_id;
-
 -- BLOCK select_all_assessment_instance
 SELECT
   ai.*

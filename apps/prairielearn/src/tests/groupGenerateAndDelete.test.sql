@@ -1,13 +1,3 @@
--- BLOCK generate_500
-SELECT
-  user_id
-FROM
-  users_randomly_generate (500, 1)
-  LEFT JOIN course_instances AS ci on (ci.id = 1)
-  LEFT JOIN pl_courses AS c ON (c.id = ci.course_id)
-ORDER BY
-  user_id;
-
 -- BLOCK select_group_work_assessment
 SELECT
   a.id

@@ -172,8 +172,8 @@ SELECT DISTINCT
   aq.max_manual_points,
   s.feedback AS old_feedback,
   s.id AS submission_id,
-  v.params,
-  v.true_answer,
+  s.params,
+  s.true_answer,
   (s.submitted_answer - '_files') AS submitted_answer,
   s.partial_scores AS old_partial_scores,
   ai.group_name,
@@ -212,8 +212,8 @@ WITH
       aq.max_manual_points,
       v.number AS variant_number,
       v.variant_seed,
-      v.params,
-      v.true_answer,
+      s.params,
+      s.true_answer,
       v.options,
       s.date,
       s.id AS submission_id,
@@ -390,7 +390,7 @@ SELECT
       END
     ) || '_' || qid || '_' || submission_id || '_' || filename
   ) AS filename,
-  base64_safe_decode (contents) AS contents
+  contents
 FROM
   all_files
 WHERE
@@ -536,7 +536,7 @@ SELECT
       END
     ) || '_' || assessment_instance_number || '_' || qid || '_' || variant_number || '_' || submission_number || '_' || submission_id || '_' || filename
   ) AS filename,
-  base64_safe_decode (contents) AS contents
+  contents
 FROM
   all_files
 WHERE
@@ -557,16 +557,31 @@ ORDER BY
 -- BLOCK group_configs
 SELECT
   g.name,
-  u.uid
+  u.uid,
+  COALESCE(
+    ARRAY_AGG(gr.role_name) FILTER (
+      WHERE
+        gr.role_name IS NOT NULL
+    ),
+    '{}'::text[]
+  ) AS roles
 FROM
   group_configs AS gc
   JOIN groups AS g ON gc.id = g.group_config_id
   JOIN group_users AS gu ON g.id = gu.group_id
   JOIN users AS u ON gu.user_id = u.user_id
+  LEFT JOIN group_user_roles AS gur ON (
+    gur.group_id = g.id
+    AND gur.user_id = u.user_id
+  )
+  LEFT JOIN group_roles AS gr ON gur.group_role_id = gr.id
 WHERE
   gc.assessment_id = $assessment_id
   AND gc.deleted_at IS NULL
   AND g.deleted_at IS NULL
+GROUP BY
+  g.name,
+  u.uid
 ORDER BY
   g.name,
   u.uid;

@@ -8,9 +8,9 @@ Consider **[adding the question or issue](https://github.com/PrairieLearn/Prairi
 
 There are three different ways to let a student re-attempt or continue an exam:
 
-1. **Continue working on the same copy of the exam:** Two things are needed: (1) Make sure the assessment is "Open" by going to the "Students" tab. If the exam is "Closed" then use the "Action" menu to re-open it. (2) Make sure the student has access to the exam. This is automatic if they are using the CBTF and have a new reservation, otherwise they will need a custom [access rule](accessControl.md) with their UID.
+1. **Continue working on the same copy of the exam:** Two things are needed: (1) Make sure the assessment is "Open" by going to the "Students" tab. If the exam is "Closed" then use the "Action" menu to re-open it. (2) Make sure the student has access to the exam. This is automatic if they are using a PrairieTest session and have a new reservation, otherwise they will need a custom [access rule](accessControl.md) with their UID.
 
-2. **Start a new randomized version of the exam:** Two things are needed: (1) Delete the student's existing copy of the exam using the "Action" menu on the "Students" tab. (2) Make sure the student has access to the exam. If they are using the CBTF they need to sign up for a new reservation, or outside the CBTF they will need a custom [access rule](accessControl.md) with their UID.
+2. **Start a new randomized version of the exam:** Two things are needed: (1) Delete the student's existing copy of the exam using the "Action" menu on the "Students" tab. (2) Make sure the student has access to the exam. If they are using PrairieTest they need to sign up for a new reservation, or outside a PrairieTest environment they will need a custom [access rule](accessControl.md) with their UID.
 
 3. **Make a custom retry exam with a different selection of questions on it:** This is normally used if many students are going to take a second-chance exam. You can copy the original exam to a new assessment in PrairieLearn (use the "Copy" button on the "Settings" tab for the assessment) and adjust the question selection and access controls as appropriate.
 
@@ -31,17 +31,19 @@ To allow students to see their entire exam after it is over, you can add an [acc
 
 Students who took the exam will then have public access to their exams after the `startDate` until the end of the course instance, while students who did not take the exam will not be able to view it. Students will not be able to answer questions for further credit (due to `"active": false`), but they will be able to see the entire exam in exactly the same state as when they were doing the exam originally. Because students have public access to the exam, it should be assumed that all the questions will be posted to websites such as Chegg and Course Hero. To let students see their exams with some additional security, consider only allowing [limited access post-exam under controlled conditions](faq.md#should-students-be-able-to-review-their-exams-after-they-are-over) (although this requires in-person access by students and doesn't work online).
 
+Note that when granting access via `"active": false`, students can still access and modify files in any [workspaces](workspaces/index.md) associated with questions on the assessment. However, they will not be able to submit any changed workspace files for grading.
+
 ## How can question pool development be managed over semesters?
 
 Writing and maintaining a large pool of questions is a lot of work. There are many strategies for managing this process. The approach taken by the TAM 2XX courses (Introductory Mechanics sequence) at Illinois is:
 
 1. Homework questions are always re-used semester-to-semester. It is assumed that solutions to these will be posted by students on the internet, so they are strictly for practice. Students do get credit for homeworks, but it assumed that any student who puts in the effort will get 100%.
-2. Some questions in the pool are [tagged](https://prairielearn.readthedocs.io/en/latest/question/#question-infojson) as "secret". These questions are only used on exams. Exams consist of a few homework questions, as well as secret questions on that topic. Secret questions are re-used for multiple semesters. Exams are only administered until highly secure conditions in the [Computer-Based Testing Facility (CBTF)](https://cbtf.engr.illinois.edu).
+2. Some questions in the pool are [tagged](https://prairielearn.readthedocs.io/en/latest/question/#question-infojson) as "secret". These questions are only used on exams. Exams consist of a few homework questions, as well as secret questions on that topic. Secret questions are re-used for multiple semesters. Exams are only administered until highly secure conditions in a testing center or similar environment.
 3. Every semester a small number of secret questions are written and some of the older secret questions are moved to homeworks. This keeps the secret pool reasonably fresh and grows the homework pool over time. It also ensures that homework and exam questions are truly comparable in topics and difficulty.
 4. For homeworks, the [`maxPoints`](https://prairielearn.readthedocs.io/en/latest/assessment/#question-specification) option is used so that students don't need to complete all homework questions to get 100% on the homework. This allows the homework to be quite long, and to be partially for credit and partially as a set of extra questions that students can practice.
 5. Homeworks can be accessed for 100% credit until the due date, for 80% credit for a week after that, and for 0% credit (but students can still practice the questions) for the rest of the semester.
 
-As an exception to the above strategy, during the COVID-19 semesters all exams were given remotely under conditions that were not as secure as the in-person CBTF. For this reason, all secret questions used on these exams are considered to be immediately "burned" and and moved to the homework pool.
+As an exception to the above strategy, during the COVID-19 semesters all exams were given remotely under conditions that were not as secure as the in-person CBTF. For this reason, all secret questions used on these exams are considered to be immediately "burned" and moved to the homework pool.
 
 ## Should students be able to review their exams after they are over?
 
@@ -51,7 +53,7 @@ Three strategies that courses adopt in practice are:
 
 1. No access post-exam. This allows exam questions to be re-used semester-to-semester, but is unpopular with students and hinders them from conducting a detailed post-exam analysis of the questions and their performance.
 2. Complete open access post-exam. This is popular with students and easy to implement, but requires a large effort by instructors to write and test new exam questions every semester.
-3. Limited access post-exam under controlled conditions. For example, the TAM 2XX courses (Introductory Mechanics sequence) at Illinois allow students to review their exams inside the secure [Computer-Based Testing Facility (CBTF)](https://cbtf.engr.illinois.edu) during exam review sessions with TAs. This is moderately popular with students ([Chang et al., 2020](https://doi.org/10.18260/1-2--34321)) and still allows exam questions to be reused. A modified form of this method is to have TAs review exams with students during office hours, on the TAs' computers. This is the approach that was used by the TAM 2XX courses prior to the CBTF-based review system.
+3. Limited access post-exam under controlled conditions. For example, the TAM 2XX courses (Introductory Mechanics sequence) at Illinois allow students to review their exams inside the secure [Computer-Based Testing Facility (CBTF)](https://cbtf.illinois.edu/) during exam review sessions with TAs. This is moderately popular with students ([Chang et al., 2020](https://doi.org/10.18260/1-2--34321)) and still allows exam questions to be reused. A modified form of this method is to have TAs review exams with students during office hours, on the TAs' computers. This is the approach that was used by the TAM 2XX courses prior to the CBTF-based review system.
 
 Note that if exams are taken online, such as during the COVID-19 semesters, then we should assume that the questions are publicly available and so there is little reason not to have open access post-exam.
 
@@ -61,15 +63,15 @@ The PrairieLearn interface only shows the most recent `variant` (a particular ra
 
 Instructors can see all past variants for students by going to the "Log" table on the view of a student's assessment instance (go to an assessment, then "Students" tab, then "Details" for a student, the scroll down to "Log"). In the Log table there is a column called "Student question" that shows a numbered list of the student views of the question, like `S-1#1`, `S-1#2`, `S-1#3`, etc. These are the first, second, third variants of that question that the student was given. Clicking those numbered links will show the specific variants, along with student answers to them.
 
-The raw history of student answers can also be accessed in the "Data" column of the Log table, from the "XXX_all_submissions.csv" file on the "Downloads" tab, and via the [PrairieLearn API](api).
+The raw history of student answers can also be accessed in the "Data" column of the Log table, from the "XXX_all_submissions.csv" file on the "Downloads" tab, and via the [PrairieLearn API](api.md).
 
 ## How do I give a student access to homeworks or an exam after the semester is over?
 
 You need to give the student access to both the course instance itself for the completed semester as well as the specific assessments within that course instance.
 
-For example, suppose Fall 2017 is the completed semester and it is now Spring 2018. We have one student (`netid@illinois.edu`) that needs to take the final exam from Fall 2017 in February 2018. We will extend the Fall 2017 course instance and final exam access to include February 2018, but only for `netid@illinois.edu`.
+For example, suppose Fall 2017 is the completed semester and it is now Spring 2018. We have one student (`student@example.com`) that needs to take the final exam from Fall 2017 in February 2018. We will extend the Fall 2017 course instance and final exam access to include February 2018, but only for `student@example.com`.
 
-First, edit `pl-exp101/courseInstance/Fa17/infoCourseInstance.json` to add a section for `netid@illinois.edu`:
+First, edit `pl-exp101/courseInstance/Fa17/infoCourseInstance.json` to add a section for `student@example.com`:
 
 ```
     "allowAccess": [
@@ -78,14 +80,14 @@ First, edit `pl-exp101/courseInstance/Fa17/infoCourseInstance.json` to add a sec
             "endDate": "2017-12-31T23:59:59"
         },
         {
-            "uids": ["netid@illinois.edu"],
+            "uids": ["student@example.com"],
             "startDate": "2018-02-01T00:00:01",
             "endDate": "2018-02-28T23:59:59"
         }
     ]
 ```
 
-Second, edit the assessment `pl-exp101/courseInstance/Fa17/assessments/final/infoAssessment.json` to add a section for `netid@illinois.edu`:
+Second, edit the assessment `pl-exp101/courseInstance/Fa17/assessments/final/infoAssessment.json` to add a section for `student@example.com`:
 
 ```
     "allowAccess": [
@@ -96,7 +98,7 @@ Second, edit the assessment `pl-exp101/courseInstance/Fa17/assessments/final/inf
             "endDate": "2017-12-22T22:10:59"
         },
         {
-            "uids": ["netid@illinois.edu"],
+            "uids": ["student@example.com"],
             "mode": "Exam",
             "credit": 100,
             "startDate": "2018-02-01T00:00:01",
@@ -130,7 +132,7 @@ then the feature can be disabled by specifying in the `infoAsssement.json`:
 See [Auto-closing Exam assessments](assessment.md#auto-closing-exam-assessments)
 for more details.
 
-## How can we provide a cheat sheet for CBTF exams?
+## How can we provide a cheat sheet for exams held in a testing center?
 
 To make a cheatsheet available to students, place the cheatsheet inside of either:
 

@@ -1,12 +1,23 @@
-import { promisify } from 'util';
 import { exec } from 'child_process';
+import { promisify } from 'util';
+
 import { z } from 'zod';
-import { loadSqlEquiv, queryRow, queryAsync, queryRows } from '@prairielearn/postgres';
+
 import * as error from '@prairielearn/error';
+import {
+  loadSqlEquiv,
+  queryRow,
+  queryAsync,
+  queryRows,
+  queryOptionalRow,
+  runInTransactionAsync,
+} from '@prairielearn/postgres';
 
-import { Course, CourseSchema } from '../lib/db-types';
+import { Course, CourseSchema } from '../lib/db-types.js';
 
-const sql = loadSqlEquiv(__filename);
+import { insertAuditLog } from './audit-log.js';
+
+const sql = loadSqlEquiv(import.meta.url);
 
 const CourseWithPermissionsSchema = CourseSchema.extend({
   permissions_course: z.object({
@@ -17,6 +28,7 @@ const CourseWithPermissionsSchema = CourseSchema.extend({
     has_course_permission_preview: z.boolean(),
   }),
 });
+export type CourseWithPermissions = z.infer<typeof CourseWithPermissionsSchema>;
 
 export async function selectCourseById(course_id: string): Promise<Course> {
   return await queryRow(
@@ -40,9 +52,11 @@ export async function getCourseCommitHash(coursePath: string): Promise<string> {
     });
     return stdout.trim();
   } catch (err) {
-    throw error.makeWithData(`Could not get git status; exited with code ${err.code}`, {
-      stdout: err.stdout,
-      stderr: err.stderr,
+    throw new error.AugmentedError(`Could not get git status; exited with code ${err.code}`, {
+      data: {
+        stdout: err.stdout,
+        stderr: err.stderr,
+      },
     });
   }
 }
@@ -121,4 +135,74 @@ export async function selectCoursesWithEditAccess({
     is_administrator,
   });
   return courses.filter((c) => c.permissions_course.has_course_permission_edit);
+}
+
+export async function selectOrInsertCourseByPath(coursePath: string): Promise<Course> {
+  return await queryRow(sql.select_or_insert_course_by_path, { path: coursePath }, CourseSchema);
+}
+
+export async function deleteCourse({
+  course_id,
+  authn_user_id,
+}: {
+  course_id: string;
+  authn_user_id: string;
+}) {
+  await runInTransactionAsync(async () => {
+    const deletedCourse = await queryOptionalRow(sql.delete_course, { course_id }, CourseSchema);
+    if (deletedCourse == null) {
+      throw new Error('Course to delete not found');
+    }
+    await insertAuditLog({
+      authn_user_id,
+      action: 'soft_delete',
+      table_name: 'pl_courses',
+      row_id: course_id,
+      new_state: deletedCourse,
+      course_id,
+      institution_id: deletedCourse.institution_id,
+    });
+  });
+}
+
+export async function insertCourse({
+  institution_id,
+  short_name,
+  title,
+  display_timezone,
+  path,
+  repository,
+  branch,
+  authn_user_id,
+}: Pick<
+  Course,
+  'institution_id' | 'short_name' | 'title' | 'display_timezone' | 'path' | 'repository' | 'branch'
+> & {
+  authn_user_id: string;
+}): Promise<Course> {
+  return await runInTransactionAsync(async () => {
+    const course = await queryRow(
+      sql.insert_course,
+      {
+        institution_id,
+        short_name,
+        title,
+        display_timezone,
+        path,
+        repository,
+        branch,
+      },
+      CourseSchema,
+    );
+    await insertAuditLog({
+      authn_user_id,
+      action: 'insert',
+      table_name: 'pl_courses',
+      row_id: course.id,
+      new_state: course,
+      institution_id,
+      course_id: course.id,
+    });
+    return course;
+  });
 }

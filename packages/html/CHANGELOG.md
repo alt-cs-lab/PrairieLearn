@@ -1,5 +1,65 @@
 # @prairielearn/html
 
+## 4.0.5
+
+### Patch Changes
+
+- 852c2e2: Upgrade all JavaScript dependencies
+
+## 4.0.4
+
+### Patch Changes
+
+- a8438ff: Upgrade all JavaScript dependencies
+
+## 4.0.3
+
+### Patch Changes
+
+- 24a93b8: Upgrade all JavaScript dependencies
+
+## 4.0.2
+
+### Patch Changes
+
+- 0f7c90f: Upgrade all JavaScript dependencies
+
+## 4.0.1
+
+### Patch Changes
+
+- 901fce8: Upgrade all JavaScript dependencies
+
+## 4.0.0
+
+### Major Changes
+
+- 4f30b7e: Publish as native ESM
+
+## 3.1.7
+
+### Patch Changes
+
+- c7e6553: Upgrade all JavaScript dependencies
+
+## 3.1.6
+
+### Patch Changes
+
+- 207602a: Upgrade all JavaScript dependencies
+
+## 3.1.5
+
+### Patch Changes
+
+- 3395c25: Upgrade all JavaScript dependencies
+
+## 3.1.4
+
+### Patch Changes
+
+- dce0fa3: Upgrade all JavaScript dependencies
+
 ## 3.1.3
 
 ### Patch Changes

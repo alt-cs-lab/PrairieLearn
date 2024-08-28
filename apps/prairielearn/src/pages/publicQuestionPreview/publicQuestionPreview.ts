@@ -1,22 +1,23 @@
-import ERR = require('async-stacktrace');
 import { Router } from 'express';
-import * as async from 'async';
-import * as path from 'path';
-import * as error from '@prairielearn/error';
+import asyncHandler from 'express-async-handler';
 import { z } from 'zod';
 
-import { selectQuestionById } from '../../models/question';
-import { selectCourseById } from '../../models/course';
-import { processSubmission } from '../../lib/questionPreview';
-import { IdSchema, UserSchema } from '../../lib/db-types';
-import LogPageView = require('../../middlewares/logPageView');
+import * as error from '@prairielearn/error';
+
+import { setQuestionCopyTargets } from '../../lib/copy-question.js';
+import { IdSchema, UserSchema } from '../../lib/db-types.js';
+import { features } from '../../lib/features/index.js';
 import {
   getAndRenderVariant,
   renderPanelsForSubmission,
   setRendererHeader,
-} from '../../lib/question-render';
+} from '../../lib/question-render.js';
+import { processSubmission } from '../../lib/question-submission.js';
+import { logPageView } from '../../middlewares/logPageView.js';
+import { selectCourseById } from '../../models/course.js';
+import { selectQuestionById } from '../../models/question.js';
 
-const logPageView = LogPageView(path.basename(__filename, '.ts'));
+import { PublicQuestionPreview } from './publicQuestionPreview.html.js';
 
 const router = Router({ mergeParams: true });
 
@@ -25,94 +26,75 @@ async function setLocals(req, res) {
   res.locals.authz_data = { user: res.locals.user };
   res.locals.course = await selectCourseById(req.params.course_id);
   res.locals.question = await selectQuestionById(req.params.question_id);
+
+  const disablePublicWorkspaces = await features.enabledFromLocals(
+    'disable-public-workspaces',
+    res.locals,
+  );
+
+  if (res.locals.question.workspace_image && disablePublicWorkspaces) {
+    throw new error.HttpStatusError(403, 'Access denied');
+  }
+
   if (
     !res.locals.question.shared_publicly ||
     res.locals.course.id !== res.locals.question.course_id
   ) {
-    throw error.make(404, 'Not Found');
+    throw new error.HttpStatusError(404, 'Not Found');
   }
   return;
 }
 
-router.post('/', function (req, res, next) {
-  setLocals(req, res)
-    .then(() => {
-      if (req.body.__action === 'grade' || req.body.__action === 'save') {
-        processSubmission(req, res, function (err, variant_id) {
-          if (ERR(err, next)) return;
-          res.redirect(
-            res.locals.urlPrefix +
-              '/question/' +
-              res.locals.question.id +
-              '/preview/?variant_id=' +
-              variant_id,
-          );
-        });
-      } else if (req.body.__action === 'report_issue') {
-        // we currently don't report issues for public facing previews
-        res.redirect(req.originalUrl);
-      } else {
-        next(
-          error.make(400, 'unknown __action: ' + req.body.__action, {
-            locals: res.locals,
-            body: req.body,
-          }),
-        );
-      }
-    })
-    .catch((err) => next(err));
-});
-
-router.get('/variant/:variant_id/submission/:submission_id', function (req, res, next) {
-  setLocals(req, res)
-    .then(() => {
-      renderPanelsForSubmission(
-        req.params.submission_id,
-        res.locals.question.id,
-        null, // instance_question_id,
-        req.params.variant_id,
-        res.locals.urlPrefix,
-        null, // questionContext
-        null, // csrfToken
-        null, // authorizedEdit
-        false, // renderScorePanels
-        (err, results) => {
-          if (ERR(err, next)) return;
-          res.send({ submissionPanel: results.submissionPanel });
-        },
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
+    await setLocals(req, res);
+    if (req.body.__action === 'grade' || req.body.__action === 'save') {
+      const variant_id = await processSubmission(req, res);
+      res.redirect(
+        `${res.locals.urlPrefix}/question/${res.locals.question.id}/preview/?variant_id=${variant_id}`,
       );
-    })
-    .catch((err) => next(err));
-});
+    } else if (req.body.__action === 'report_issue') {
+      // we currently don't report issues for public facing previews
+      res.redirect(req.originalUrl);
+    } else {
+      throw new error.HttpStatusError(400, `unknown __action: ${req.body.__action}`);
+    }
+  }),
+);
 
-router.get('/', function (req, res, next) {
-  setLocals(req, res)
-    .then(() => {
-      const variant_seed = req.query.variant_seed ? z.string().parse(req.query.variant_seed) : null;
-      const variant_id = req.query.variant_id ? IdSchema.parse(req.query.variant_id) : null;
-      return async.series(
-        [
-          (callback) => {
-            getAndRenderVariant(variant_id, variant_seed, res.locals, function (err) {
-              if (ERR(err, callback)) return;
-              callback(null);
-            });
-          },
-          (callback) => {
-            logPageView(req, res, (err) => {
-              if (ERR(err, next)) return;
-              callback(null);
-            });
-          },
-        ],
-        (err) => {
-          if (ERR(err, next)) return;
-          setRendererHeader(res);
-          res.render(__filename.replace(/\.(js|ts)$/, '.ejs'), res.locals);
-        },
-      );
-    })
-    .catch((err) => next(err));
-});
+router.get(
+  '/variant/:variant_id(\\d+)/submission/:submission_id(\\d+)',
+  asyncHandler(async (req, res) => {
+    await setLocals(req, res);
+    const { submissionPanel, extraHeadersHtml } = await renderPanelsForSubmission({
+      submission_id: req.params.submission_id,
+      question_id: res.locals.question.id,
+      instance_question_id: null,
+      variant_id: req.params.variant_id,
+      user_id: res.locals.user.user_id,
+      urlPrefix: res.locals.urlPrefix,
+      questionContext: 'public',
+      csrfToken: null,
+      authorizedEdit: null,
+      renderScorePanels: false,
+    });
+    res.send({ submissionPanel, extraHeadersHtml });
+  }),
+);
 
-export = router;
+router.get(
+  '/',
+  asyncHandler(async (req, res) => {
+    await setLocals(req, res);
+    const variant_seed = req.query.variant_seed ? z.string().parse(req.query.variant_seed) : null;
+    const variant_id = req.query.variant_id ? IdSchema.parse(req.query.variant_id) : null;
+    await getAndRenderVariant(variant_id, variant_seed, res.locals);
+    await logPageView('publicQuestionPreview', req, res);
+    await setQuestionCopyTargets(res);
+    setRendererHeader(res);
+    res.send(PublicQuestionPreview({ resLocals: res.locals }));
+  }),
+);
+
+export default router;

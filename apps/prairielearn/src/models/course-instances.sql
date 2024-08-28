@@ -1,3 +1,11 @@
+-- BLOCK select_course_instance_by_id
+SELECT
+  ci.*
+FROM
+  course_instances AS ci
+WHERE
+  ci.id = $course_instance_id;
+
 -- BLOCK select_course_instances_with_staff_access
 SELECT
   ci.*,
@@ -36,7 +44,6 @@ FROM
       course_instance_access_rules AS ar
     WHERE
       ar.course_instance_id = ci.id
-      AND ((ar.role > 'Student') IS NOT TRUE)
   ) AS d
 WHERE
   c.id = $course_id
@@ -55,3 +62,14 @@ ORDER BY
   d.start_date DESC NULLS LAST,
   d.end_date DESC NULLS LAST,
   ci.id DESC;
+
+-- BLOCK select_users_with_course_instance_access
+SELECT
+  u.*
+FROM
+  course_instance_permissions AS cip
+  JOIN course_permissions AS cp ON (cp.id = cip.course_permission_id)
+  JOIN users AS u ON (u.user_id = cp.user_id)
+WHERE
+  cip.course_instance_id = $course_instance_id
+  AND cip.course_instance_role >= $minimal_role;

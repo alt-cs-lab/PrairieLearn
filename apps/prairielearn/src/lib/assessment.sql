@@ -40,12 +40,61 @@ WHERE
 
 -- BLOCK close_assessment_instance
 WITH
+  all_dates AS (
+    (
+      SELECT
+        ai.date
+      FROM
+        assessment_instances AS ai
+      WHERE
+        ai.id = $assessment_instance_id
+    )
+    UNION ALL
+    (
+      SELECT
+        s.date
+      FROM
+        submissions AS s
+        JOIN variants AS v ON (v.id = s.variant_id)
+        JOIN instance_questions AS iq ON (iq.id = v.instance_question_id)
+      WHERE
+        iq.assessment_instance_id = $assessment_instance_id
+    )
+  ),
+  all_gaps AS (
+    SELECT
+      date - lag(date) OVER (
+        ORDER BY
+          date
+      ) AS gap
+    FROM
+      all_dates
+  ),
+  total_gap AS (
+    SELECT
+      sum(gap) AS duration
+    FROM
+      all_gaps
+      JOIN assessment_instances AS ai ON (ai.id = $assessment_instance_id)
+      JOIN assessments AS a ON (a.id = ai.assessment_id)
+    WHERE
+      a.type != 'Homework'
+      OR gap < '1 hour'::INTERVAL
+  ),
   updated_assessment_instance AS (
     UPDATE assessment_instances AS ai
     SET
       open = FALSE,
       closed_at = CURRENT_TIMESTAMP,
-      duration = assessment_instances_duration (ai.id),
+      duration = COALESCE(
+        (
+          SELECT
+            duration
+          FROM
+            total_gap
+        ),
+        '0 seconds'::INTERVAL
+      ),
       modified_at = now(),
       -- Mark the assessment instance as in need of grading. We'll start
       -- grading immediately, but in case the PrairieLearn process dies in
@@ -58,11 +107,17 @@ WITH
       ai.id
   )
 INSERT INTO
-  assessment_state_logs (open, assessment_instance_id, auth_user_id)
+  assessment_state_logs (
+    open,
+    assessment_instance_id,
+    auth_user_id,
+    client_fingerprint_id
+  )
 SELECT
   FALSE,
   updated_assessment_instance.id,
-  $authn_user_id
+  $authn_user_id,
+  $client_fingerprint_id
 FROM
   updated_assessment_instance;
 
@@ -133,6 +188,174 @@ WHERE
   a.id = $assessment_id;
 
 -- BLOCK update_assessment_statisics
+WITH
+  student_assessment_scores AS (
+    SELECT
+      -- if a student has multiple assessment_instances for this assessment
+      -- then use their maximum score
+      max(ai.score_perc) AS score_perc
+    FROM
+      assessment_instances AS ai
+      JOIN assessments AS a ON (a.id = ai.assessment_id)
+      -- Only select groups that are not soft-deleted
+      LEFT JOIN groups AS g ON (
+        g.id = ai.group_id
+        AND g.deleted_at IS NULL
+      )
+      LEFT JOIN group_users AS gu ON (gu.group_id = g.id)
+      JOIN users AS u ON (u.user_id = COALESCE(ai.user_id, gu.user_id))
+      JOIN enrollments AS e ON (
+        e.user_id = u.user_id
+        AND e.course_instance_id = a.course_instance_id
+      )
+    WHERE
+      a.id = $assessment_id
+      AND ai.include_in_statistics
+    GROUP BY
+      u.user_id
+  ),
+  score_stats AS (
+    SELECT
+      count(score_perc) AS number,
+      coalesce(min(score_perc), 0) AS min,
+      coalesce(max(score_perc), 0) AS max,
+      coalesce(avg(score_perc), 0) AS mean,
+      coalesce(stddev_samp(score_perc), 0) AS std,
+      coalesce(
+        percentile_disc(0.5) WITHIN GROUP (
+          ORDER BY
+            score_perc
+        ),
+        0
+      ) AS median,
+      count(
+        score_perc <= 0
+        OR NULL
+      ) AS n_zero,
+      count(
+        score_perc >= 100
+        OR NULL
+      ) AS n_hundred,
+      CAST(
+        count(
+          score_perc <= 0
+          OR NULL
+        ) AS double precision
+      ) / greatest(1, count(score_perc)) * 100 AS n_zero_perc,
+      CAST(
+        count(
+          score_perc >= 100
+          OR NULL
+        ) AS double precision
+      ) / greatest(1, count(score_perc)) * 100 AS n_hundred_perc,
+      coalesce(
+        histogram (score_perc, 0, 100, 10),
+        array_fill(0, ARRAY[10])
+      ) AS score_hist
+    FROM
+      student_assessment_scores
+  ),
+  basic_duration_stats AS (
+    SELECT
+      coalesce(min(duration), interval '0') AS min,
+      coalesce(max(duration), interval '0') AS max,
+      coalesce(avg(duration), interval '0') AS mean,
+      coalesce(
+        percentile_disc(0.5) WITHIN GROUP (
+          ORDER BY
+            duration
+        ),
+        interval '0'
+      ) AS median,
+      coalesce(
+        percentile_disc(0.75) WITHIN GROUP (
+          ORDER BY
+            duration
+        ),
+        interval '0'
+      ) AS quartile3,
+      coalesce(
+        percentile_disc(0.9) WITHIN GROUP (
+          ORDER BY
+            duration
+        ),
+        interval '0'
+      ) AS perc90
+    FROM
+      assessment_instances AS ai
+      JOIN assessments AS a ON (a.id = ai.assessment_id)
+      -- Only select groups that are not soft-deleted
+      LEFT JOIN groups AS g ON (
+        g.id = ai.group_id
+        AND g.deleted_at IS NULL
+      )
+      LEFT JOIN group_users AS gu ON (gu.group_id = g.id)
+      JOIN users AS u ON (u.user_id = COALESCE(ai.user_id, gu.user_id))
+      JOIN enrollments AS e ON (
+        e.user_id = u.user_id
+        AND e.course_instance_id = a.course_instance_id
+      )
+    WHERE
+      a.id = $assessment_id
+      AND ai.include_in_statistics
+  ),
+  duration_stats AS (
+    SELECT
+      *,
+      interval_hist_thresholds (
+        coalesce(
+          greatest(quartile3 + 2 * (quartile3 - median), perc90),
+          interval '10 minutes'
+        )
+      ) AS thresholds
+    FROM
+      basic_duration_stats
+  ),
+  duration_hist_stats AS (
+    SELECT
+      coalesce(
+        array_histogram (
+          ai.duration,
+          (
+            SELECT
+              thresholds
+            FROM
+              duration_stats
+          )
+        ),
+        array_fill(
+          0,
+          ARRAY[
+            array_length(
+              (
+                SELECT
+                  thresholds
+                FROM
+                  duration_stats
+              ),
+              1
+            ) - 1
+          ]
+        )
+      ) AS hist
+    FROM
+      assessment_instances AS ai
+      JOIN assessments AS a ON (a.id = ai.assessment_id)
+      -- Only select groups that are not soft-deleted
+      LEFT JOIN groups AS g ON (
+        g.id = ai.group_id
+        AND g.deleted_at IS NULL
+      )
+      LEFT JOIN group_users AS gu ON (gu.group_id = g.id)
+      JOIN users AS u ON (u.user_id = COALESCE(ai.user_id, gu.user_id))
+      JOIN enrollments AS e ON (
+        e.user_id = u.user_id
+        AND e.course_instance_id = a.course_instance_id
+      )
+    WHERE
+      a.id = $assessment_id
+      AND NOT users_is_instructor_in_course_instance (e.user_id, e.course_instance_id)
+  )
 UPDATE assessments AS a
 SET
   statistics_last_updated_at = now(),
@@ -152,18 +375,19 @@ SET
   duration_stat_mean = duration_stats.mean,
   duration_stat_median = duration_stats.median,
   duration_stat_thresholds = duration_stats.thresholds,
-  duration_stat_threshold_seconds = duration_stats.threshold_seconds,
-  duration_stat_threshold_labels = duration_stats.threshold_labels,
-  duration_stat_hist = duration_stats.hist
+  duration_stat_threshold_seconds = interval_array_to_seconds (duration_stats.thresholds),
+  duration_stat_threshold_labels = interval_array_to_strings (duration_stats.thresholds),
+  duration_stat_hist = duration_hist_stats.hist
 FROM
-  assessments_score_stats ($assessment_id) AS score_stats,
-  assessments_duration_stats ($assessment_id) AS duration_stats
+  score_stats,
+  duration_stats,
+  duration_hist_stats
 WHERE
   a.id = $assessment_id;
 
--- BLOCK select_and_lock_assessment_instance_max_points
+-- BLOCK select_and_lock_assessment_instance
 SELECT
-  ai.max_points
+  ai.*
 FROM
   assessment_instances AS ai
 WHERE
@@ -286,7 +510,10 @@ WITH
           'variant_seed',
           v.variant_seed,
           'params',
-          v.params,
+          CASE
+            WHEN $include_files THEN v.params
+            ELSE (v.params - '_workspace_files')
+          END,
           'true_answer',
           v.true_answer,
           'options',
@@ -300,6 +527,34 @@ WITH
         LEFT JOIN users AS u ON (u.user_id = v.authn_user_id)
       WHERE
         iq.assessment_instance_id = $assessment_instance_id
+    )
+    UNION
+    (
+      SELECT
+        2.5 AS event_order,
+        'Broken variant'::TEXT AS event_name,
+        'red3'::TEXT AS event_color,
+        v.broken_at AS date,
+        u.user_id AS auth_user_id,
+        u.uid AS auth_user_uid,
+        q.qid AS qid,
+        q.id AS question_id,
+        iq.id AS instance_question_id,
+        v.id AS variant_id,
+        v.number AS variant_number,
+        NULL::INTEGER AS submission_id,
+        v.id AS log_id,
+        NULL::BIGINT AS client_fingerprint_id,
+        NULL::JSONB AS data
+      FROM
+        variants AS v
+        JOIN instance_questions AS iq ON (iq.id = v.instance_question_id)
+        JOIN assessment_questions AS aq ON (aq.id = iq.assessment_question_id)
+        JOIN questions AS q ON (q.id = aq.question_id)
+        LEFT JOIN users AS u ON (u.user_id = v.broken_by)
+      WHERE
+        v.broken_at IS NOT NULL
+        AND iq.assessment_instance_id = $assessment_instance_id
     )
     UNION
     (
@@ -482,7 +737,7 @@ WITH
             ELSE (s.submitted_answer - '_files')
           END,
           'true_answer',
-          v.true_answer
+          s.true_answer
         ) AS data
       FROM
         grading_jobs AS gj
@@ -731,7 +986,9 @@ WITH
         NULL::INTEGER AS submission_id,
         gl.id AS log_id,
         NULL::BIGINT AS client_fingerprint_id,
-        jsonb_build_object('user', gu.uid) AS data
+        jsonb_strip_nulls(
+          jsonb_build_object('user', gu.uid, 'roles', gl.roles)
+        ) AS data
       FROM
         assessment_instances AS ai
         JOIN group_logs AS gl ON (gl.group_id = ai.group_id)
@@ -786,3 +1043,351 @@ ORDER BY
   el.event_order,
   el.log_id,
   el.question_id;
+
+-- BLOCK calculate_stats_for_assessment_question
+WITH
+  relevant_assessment_instances AS (
+    SELECT DISTINCT
+      ai.*
+    FROM
+      assessment_questions AS aq
+      JOIN assessments AS a ON (a.id = aq.assessment_id)
+      JOIN assessment_instances AS ai ON (ai.assessment_id = a.id)
+    WHERE
+      aq.id = $assessment_question_id
+      AND ai.include_in_statistics
+  ),
+  relevant_instance_questions AS (
+    SELECT DISTINCT
+      iq.*,
+      -- Determine a unique ID for each user or group by making group IDs
+      -- negative. Exactly one of user_id or group_id will be NULL, so this
+      -- results in a unqiue non-NULL ID for each assessment instance.
+      coalesce(ai.user_id, - ai.group_id) AS u_gr_id
+    FROM
+      instance_questions AS iq
+      JOIN relevant_assessment_instances AS ai ON (ai.id = iq.assessment_instance_id)
+    WHERE
+      iq.assessment_question_id = $assessment_question_id
+  ),
+  assessment_scores_by_user_or_group AS (
+    SELECT
+      coalesce(ai.user_id, - ai.group_id) AS u_gr_id,
+      max(ai.score_perc) AS score_perc
+    FROM
+      relevant_assessment_instances AS ai
+    GROUP BY
+      coalesce(ai.user_id, - ai.group_id)
+  ),
+  question_stats_by_user_or_group AS (
+    SELECT
+      iq.u_gr_id,
+      avg(iq.score_perc) AS score_perc,
+      100 * count(iq.id) FILTER (
+        WHERE
+          iq.some_submission = TRUE
+      ) / count(iq.id) AS some_submission_perc,
+      100 * count(iq.id) FILTER (
+        WHERE
+          iq.some_perfect_submission = TRUE
+      ) / count(iq.id) AS some_perfect_submission_perc,
+      100 * count(iq.id) FILTER (
+        WHERE
+          iq.some_nonzero_submission = TRUE
+      ) / count(iq.id) AS some_nonzero_submission_perc,
+      avg(iq.first_submission_score) AS first_submission_score,
+      avg(iq.last_submission_score) AS last_submission_score,
+      avg(iq.max_submission_score) AS max_submission_score,
+      avg(iq.average_submission_score) AS average_submission_score,
+      array_avg (iq.submission_score_array) AS submission_score_array,
+      array_avg (iq.incremental_submission_score_array) AS incremental_submission_score_array,
+      array_avg (iq.incremental_submission_points_array) AS incremental_submission_points_array,
+      avg(iq.number_attempts) AS number_submissions
+    FROM
+      relevant_instance_questions AS iq
+    GROUP BY
+      iq.u_gr_id
+  ),
+  user_quintiles AS (
+    SELECT
+      assessment_scores_by_user_or_group.u_gr_id,
+      ntile(5) OVER (
+        ORDER BY
+          assessment_scores_by_user_or_group.score_perc
+      ) as quintile
+    FROM
+      assessment_scores_by_user_or_group
+  ),
+  quintile_scores AS (
+    SELECT
+      avg(question_stats_by_user_or_group.score_perc) AS quintile_score
+    FROM
+      question_stats_by_user_or_group
+      JOIN user_quintiles USING (u_gr_id)
+    GROUP BY
+      user_quintiles.quintile
+    ORDER BY
+      user_quintiles.quintile
+  ),
+  quintile_scores_as_array AS (
+    SELECT
+      array_agg(quintile_score) AS scores
+    FROM
+      quintile_scores
+  ),
+  aq_stats AS (
+    SELECT
+      least(
+        100,
+        greatest(
+          0,
+          avg(question_stats_by_user_or_group.score_perc)
+        )
+      ) AS mean_question_score,
+      percentile_cont(0.5) WITHIN GROUP (
+        ORDER BY
+          question_stats_by_user_or_group.score_perc
+      ) AS median_question_score,
+      sqrt(
+        var_pop(question_stats_by_user_or_group.score_perc)
+      ) AS question_score_variance,
+      coalesce(
+        corr(
+          question_stats_by_user_or_group.score_perc,
+          assessment_scores_by_user_or_group.score_perc
+        ) * 100,
+        CASE
+          WHEN count(question_stats_by_user_or_group.score_perc) > 0 THEN 0
+          ELSE NULL
+        END
+      ) AS discrimination,
+      avg(
+        question_stats_by_user_or_group.some_submission_perc
+      ) AS some_submission_perc,
+      avg(
+        question_stats_by_user_or_group.some_perfect_submission_perc
+      ) AS some_perfect_submission_perc,
+      avg(
+        question_stats_by_user_or_group.some_nonzero_submission_perc
+      ) AS some_nonzero_submission_perc,
+      avg(
+        question_stats_by_user_or_group.first_submission_score
+      ) AS average_first_submission_score,
+      sqrt(
+        var_pop(
+          question_stats_by_user_or_group.first_submission_score
+        )
+      ) AS first_submission_score_variance,
+      histogram (
+        question_stats_by_user_or_group.first_submission_score,
+        0,
+        1,
+        10
+      ) AS first_submission_score_hist,
+      avg(
+        question_stats_by_user_or_group.last_submission_score
+      ) AS average_last_submission_score,
+      sqrt(
+        var_pop(
+          question_stats_by_user_or_group.last_submission_score
+        )
+      ) AS last_submission_score_variance,
+      histogram (
+        question_stats_by_user_or_group.last_submission_score,
+        0,
+        1,
+        10
+      ) AS last_submission_score_hist,
+      avg(
+        question_stats_by_user_or_group.max_submission_score
+      ) AS average_max_submission_score,
+      sqrt(
+        var_pop(
+          question_stats_by_user_or_group.max_submission_score
+        )
+      ) AS max_submission_score_variance,
+      histogram (
+        question_stats_by_user_or_group.max_submission_score,
+        0,
+        1,
+        10
+      ) AS max_submission_score_hist,
+      avg(
+        question_stats_by_user_or_group.average_submission_score
+      ) AS average_average_submission_score,
+      sqrt(
+        var_pop(
+          question_stats_by_user_or_group.average_submission_score
+        )
+      ) AS average_submission_score_variance,
+      histogram (
+        question_stats_by_user_or_group.average_submission_score,
+        0,
+        1,
+        10
+      ) AS average_submission_score_hist,
+      array_avg (
+        question_stats_by_user_or_group.submission_score_array
+      ) AS submission_score_array_averages,
+      array_var (
+        question_stats_by_user_or_group.submission_score_array
+      ) AS submission_score_array_variances,
+      array_avg (
+        question_stats_by_user_or_group.incremental_submission_score_array
+      ) AS incremental_submission_score_array_averages,
+      array_var (
+        question_stats_by_user_or_group.incremental_submission_score_array
+      ) AS incremental_submission_score_array_variances,
+      array_avg (
+        question_stats_by_user_or_group.incremental_submission_points_array
+      ) AS incremental_submission_points_array_averages,
+      array_var (
+        question_stats_by_user_or_group.incremental_submission_points_array
+      ) AS incremental_submission_points_array_variances,
+      avg(
+        question_stats_by_user_or_group.number_submissions
+      ) AS average_number_submissions,
+      var_pop(
+        question_stats_by_user_or_group.number_submissions
+      ) AS number_submissions_variance,
+      histogram (
+        question_stats_by_user_or_group.number_submissions,
+        0,
+        10,
+        10
+      ) AS number_submissions_hist
+    FROM
+      question_stats_by_user_or_group
+      JOIN assessment_scores_by_user_or_group USING (u_gr_id)
+  )
+UPDATE assessment_questions AS aq
+SET
+  quintile_question_scores = quintile_scores_as_array.scores,
+  mean_question_score = aq_stats.mean_question_score,
+  median_question_score = aq_stats.median_question_score,
+  question_score_variance = aq_stats.question_score_variance,
+  discrimination = aq_stats.discrimination,
+  some_submission_perc = aq_stats.some_submission_perc,
+  some_perfect_submission_perc = aq_stats.some_perfect_submission_perc,
+  some_nonzero_submission_perc = aq_stats.some_nonzero_submission_perc,
+  average_first_submission_score = aq_stats.average_first_submission_score,
+  first_submission_score_variance = aq_stats.first_submission_score_variance,
+  first_submission_score_hist = aq_stats.first_submission_score_hist,
+  average_last_submission_score = aq_stats.average_last_submission_score,
+  last_submission_score_variance = aq_stats.last_submission_score_variance,
+  last_submission_score_hist = aq_stats.last_submission_score_hist,
+  average_max_submission_score = aq_stats.average_max_submission_score,
+  max_submission_score_variance = aq_stats.max_submission_score_variance,
+  max_submission_score_hist = aq_stats.max_submission_score_hist,
+  average_average_submission_score = aq_stats.average_average_submission_score,
+  average_submission_score_variance = aq_stats.average_submission_score_variance,
+  average_submission_score_hist = aq_stats.average_submission_score_hist,
+  submission_score_array_averages = aq_stats.submission_score_array_averages,
+  submission_score_array_variances = aq_stats.submission_score_array_variances,
+  incremental_submission_score_array_averages = aq_stats.incremental_submission_score_array_averages,
+  incremental_submission_score_array_variances = aq_stats.incremental_submission_score_array_variances,
+  incremental_submission_points_array_averages = aq_stats.incremental_submission_points_array_averages,
+  incremental_submission_points_array_variances = aq_stats.incremental_submission_points_array_variances,
+  average_number_submissions = aq_stats.average_number_submissions,
+  number_submissions_variance = aq_stats.number_submissions_variance,
+  number_submissions_hist = aq_stats.number_submissions_hist
+FROM
+  quintile_scores_as_array,
+  aq_stats
+WHERE
+  aq.id = $assessment_question_id;
+
+-- BLOCK select_assessment_questions
+SELECT
+  aq.id
+FROM
+  assessment_questions AS aq
+WHERE
+  aq.assessment_id = $assessment_id
+  AND aq.deleted_at IS NULL;
+
+-- BLOCK update_assessment_stats_last_updated
+UPDATE assessments AS a
+SET
+  stats_last_updated = current_timestamp
+WHERE
+  a.id = $assessment_id;
+
+-- BLOCK delete_assessment_instance
+WITH
+  deleted_assessment_instances AS (
+    DELETE FROM assessment_instances AS ai
+    WHERE
+      ai.assessment_id = $assessment_id
+      AND ai.id = $assessment_instance_id
+    RETURNING
+      ai.*
+  ),
+  new_log AS (
+    INSERT INTO
+      audit_logs (
+        authn_user_id,
+        course_id,
+        course_instance_id,
+        user_id,
+        group_id,
+        table_name,
+        row_id,
+        action,
+        old_state
+      )
+    SELECT
+      $authn_user_id,
+      ci.course_id,
+      a.course_instance_id,
+      ai.user_id,
+      ai.group_id,
+      'assessment_instances',
+      ai.id,
+      'delete',
+      to_jsonb(ai.*)
+    FROM
+      deleted_assessment_instances AS ai
+      LEFT JOIN assessments AS a ON (a.id = ai.assessment_id)
+      LEFT JOIN course_instances AS ci ON (ci.id = a.course_instance_id)
+  )
+SELECT
+  ai.id
+FROM
+  deleted_assessment_instances AS ai;
+
+-- BLOCK delete_all_assessment_instances_for_assessment
+WITH
+  deleted_assessment_instances AS (
+    DELETE FROM assessment_instances AS ai
+    WHERE
+      ai.assessment_id = $assessment_id
+    RETURNING
+      ai.*
+  )
+INSERT INTO
+  audit_logs (
+    authn_user_id,
+    course_id,
+    course_instance_id,
+    user_id,
+    group_id,
+    table_name,
+    row_id,
+    action,
+    old_state
+  )
+SELECT
+  $authn_user_id,
+  ci.course_id,
+  a.course_instance_id,
+  ai.user_id,
+  ai.group_id,
+  'assessment_instances',
+  ai.id,
+  'delete',
+  to_jsonb(ai.*)
+FROM
+  deleted_assessment_instances AS ai
+  LEFT JOIN assessments AS a ON (a.id = ai.assessment_id)
+  LEFT JOIN course_instances AS ci ON (ci.id = a.course_instance_id);

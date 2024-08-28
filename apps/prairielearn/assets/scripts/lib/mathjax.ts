@@ -50,7 +50,7 @@ const mathjaxPromise = new Promise<void>((resolve) => {
       ready: () => {
         window.MathJax.startup.defaultReady();
         window.MathJax.Hub = {
-          Queue: function () {
+          Queue() {
             console.warn(
               'MathJax.Hub.Queue() has been deprecated in 3.0, please use MathJax.typesetPromise()',
             );
@@ -64,6 +64,22 @@ const mathjaxPromise = new Promise<void>((resolve) => {
       },
     },
   };
+
+  // The MathJax initialization script will wipe our `typesetPromise` function
+  // until it has loaded itself, so we'll do this hacky little thing to ensure
+  // that `typesetPromise` is always available, even while MathJax is loading.
+  let mj = window.MathJax;
+  Object.defineProperty(window, 'MathJax', {
+    set: (value) => {
+      mj = value;
+      mj.typesetPromise = mathjaxTypeset;
+    },
+    get() {
+      return mj;
+    },
+    configurable: true,
+    enumerable: true,
+  });
 });
 
 export async function mathjaxTypeset() {

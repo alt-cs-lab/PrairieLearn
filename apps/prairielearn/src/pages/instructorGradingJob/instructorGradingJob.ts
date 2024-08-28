@@ -1,21 +1,24 @@
-import * as express from 'express';
+import type * as stream from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+
 import { S3, NoSuchKey } from '@aws-sdk/client-s3';
+import * as express from 'express';
+import asyncHandler from 'express-async-handler';
+
 import * as error from '@prairielearn/error';
 import * as sqldb from '@prairielearn/postgres';
-import asyncHandler = require('express-async-handler');
-import type * as stream from 'node:stream';
 
-import { makeS3ClientConfig } from '../../lib/aws';
-import { InstructorGradingJob, GradingJobQueryResultSchema } from './instructorGradingJob.html';
+import { makeS3ClientConfig } from '../../lib/aws.js';
+
+import { InstructorGradingJob, GradingJobRowSchema } from './instructorGradingJob.html.js';
 
 const router = express.Router();
-const sql = sqldb.loadSqlEquiv(__filename);
+const sql = sqldb.loadSqlEquiv(import.meta.url);
 
 router.get(
-  '/:job_id',
+  '/:job_id(\\d+)',
   asyncHandler(async (req, res) => {
-    const gradingJobQueryResult = await sqldb.queryOptionalRow(
+    const gradingJobRow = await sqldb.queryOptionalRow(
       sql.select_job,
       {
         job_id: req.params.job_id,
@@ -24,10 +27,10 @@ router.get(
         authz_data: res.locals.authz_data,
         req_date: res.locals.req_date,
       },
-      GradingJobQueryResultSchema,
+      GradingJobRowSchema,
     );
-    if (gradingJobQueryResult === null) {
-      throw error.make(404, 'Job not found');
+    if (gradingJobRow === null) {
+      throw new error.HttpStatusError(404, 'Job not found');
     }
 
     // If the grading job is associated with an assessment instance (through a
@@ -36,15 +39,15 @@ router.get(
     //
     // The way we implement this check right now with authz_assessment_instance
     // is overkill, yes, but is easy and robust (we hope).
-    if (gradingJobQueryResult.aai && !gradingJobQueryResult.aai.authorized) {
-      throw error.make(403, 'Access denied (must be a student data viewer)');
+    if (gradingJobRow.aai && !gradingJobRow.aai.authorized) {
+      throw new error.HttpStatusError(403, 'Access denied (must be a student data viewer)');
     }
-    res.send(InstructorGradingJob({ resLocals: res.locals, gradingJobQueryResult }));
+    res.send(InstructorGradingJob({ resLocals: res.locals, gradingJobRow }));
   }),
 );
 
 router.get(
-  '/:job_id/file/:file',
+  '/:job_id(\\d+)/file/:file',
   asyncHandler(async (req, res) => {
     const file = req.params.file;
     const allowList = res.locals.authz_data.has_course_permission_view
@@ -52,10 +55,10 @@ router.get(
       : ['output.log', 'results.json'];
 
     if (allowList.indexOf(file) === -1) {
-      throw error.make(404, `Unknown file ${file}`);
+      throw new error.HttpStatusError(404, `Unknown file ${file}`);
     }
 
-    const gradingJobQueryResult = await sqldb.queryOptionalRow(
+    const gradingJobRow = await sqldb.queryOptionalRow(
       sql.select_job,
       {
         job_id: req.params.job_id,
@@ -64,10 +67,10 @@ router.get(
         authz_data: res.locals.authz_data,
         req_date: res.locals.req_date,
       },
-      GradingJobQueryResultSchema,
+      GradingJobRowSchema,
     );
-    if (gradingJobQueryResult === null) {
-      throw error.make(404, 'Job not found');
+    if (gradingJobRow === null) {
+      throw new error.HttpStatusError(404, 'Job not found');
     }
     // If the grading job is associated with an assessment instance (through a
     // submission, a variant, and an instance question), then we need to check
@@ -75,11 +78,11 @@ router.get(
     //
     // The way we implement this check right now with authz_assessment_instance
     // is overkill, yes, but is easy and robust (we hope).
-    if (gradingJobQueryResult.aai && !gradingJobQueryResult.aai.authorized) {
-      throw error.make(403, 'Access denied (must be a student data viewer)');
+    if (gradingJobRow.aai && !gradingJobRow.aai.authorized) {
+      throw new error.HttpStatusError(403, 'Access denied (must be a student data viewer)');
     }
 
-    const grading_job = gradingJobQueryResult.grading_job;
+    const grading_job = gradingJobRow.grading_job;
 
     if (!grading_job.s3_bucket || !grading_job.s3_root_key) {
       throw new Error(`Job ${grading_job.id} does not have any files stored in S3.`);

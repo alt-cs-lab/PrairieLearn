@@ -44,7 +44,7 @@ jobs:
       ######################################################################################################
       # prairielearn
       - name: Build and push prairielearn/prairielearn
-        uses: docker/build-push-action@v5 # https://github.com/marketplace/actions/build-and-push-docker-images
+        uses: docker/build-push-action@v6 # https://github.com/marketplace/actions/build-and-push-docker-images
         with:
           context: .
           # QEMU is *extremely* slow on GitHub Actions, taking over 2 hours to

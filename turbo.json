@@ -1,16 +1,17 @@
 {
-  "baseBranch": "origin/master",
-  "pipeline": {
+  "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "public/build/**"]
     },
     "test": {
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": ["*"]
     },
     "test:dist": {
       "dependsOn": ["build"],
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": ["*"]
     }
   }
 }
