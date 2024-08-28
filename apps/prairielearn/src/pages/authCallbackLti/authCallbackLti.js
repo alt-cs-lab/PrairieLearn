@@ -109,7 +109,7 @@ router.post(
       '@' +
       parameters.context_id +
       '::ciid=' +
-      ltiresult.course_instance_id;
+      ltiResult.course_instance_id;
     // @russfeld end
 
     let fallbackName = 'LTI user';

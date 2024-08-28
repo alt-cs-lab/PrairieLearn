@@ -5,7 +5,7 @@ const router = express.Router();
 const url = require('url');
 
 const { logger } = require('@prairielearn/logger');
-const { config } = require('../../lib/config');
+const { config } = require('../../lib/config.js');
 
 router.get('/', function (req, res, next) {
   if (!config.hasCas || !config.casUrl || !config.casServiceUrl) {

@@ -8,10 +8,10 @@ const url = require('url');
 const http = require('http');
 const https = require('https');
 const parseXML = require('xml2js').parseString;
-const XMLprocessors = require('xml2js/lib/processors');
+const XMLprocessors = require('xml2js/lib/processors.js');
 
-const authnLib = require('../../lib/authn');
-const { config } = require('../../lib/config');
+const authnLib = require('../../lib/authn.js');
+const { config } = require('../../lib/config.js');
 
 const router = express.Router();
 
