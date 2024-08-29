@@ -1,19 +1,19 @@
 // @ts-check
 // @russfeld start
-const assert = require('assert');
-const express = require('express');
-const asyncHandler = require('express-async-handler');
-const { logger } = require('@prairielearn/logger');
-const url = require('url');
-const http = require('http');
-const https = require('https');
-const parseXML = require('xml2js').parseString;
-const XMLprocessors = require('xml2js/lib/processors.js');
+// const assert = require('assert');
+import { Router } from 'express';
+import asyncHandler from 'express-async-handler';
+import { logger } from '@prairielearn/logger';
+import url from 'url';
+import http from 'http';
+import https from 'https';
+import { parseString as parseXML } from 'xml2js';
+import { normalize, stripPrefix } from 'xml2js/lib/processors.js'
 
-const authnLib = require('../../lib/authn.js');
-const { config } = require('../../lib/config.js');
+import * as authnLib from '../../lib/authn.js';
+import { config } from '../../lib/config.js';
 
-const router = express.Router();
+const router = Router();
 
 const validate = function (body, callback) {
   parseXML(
@@ -22,7 +22,7 @@ const validate = function (body, callback) {
       trim: true,
       normalize: true,
       explicitArray: false,
-      tagNameProcessors: [XMLprocessors.normalize, XMLprocessors.stripPrefix],
+      tagNameProcessors: [normalize, stripPrefix],
     },
     function (err, result) {
       if (err) {
@@ -116,7 +116,7 @@ router.get(
                 } else {
                   logger.verbose('CAS authentication success for user ' + user);
                   logger.verbose('CAS attributes', attributes);
-                  assert(user);
+                  // assert(user);
                   let authnParams = {
                     uid: user,
                     name: user,
@@ -154,5 +154,5 @@ router.get(
   })
 );
 
-module.exports = router;
+export default router;
 // @russfeld end

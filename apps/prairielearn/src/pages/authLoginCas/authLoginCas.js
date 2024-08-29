@@ -1,11 +1,12 @@
 // @ts-check
 // @russfeld start
-const express = require('express');
-const router = express.Router();
-const url = require('url');
+import { Router } from 'express';
+import url from 'url';
 
-const { logger } = require('@prairielearn/logger');
-const { config } = require('../../lib/config.js');
+import { logger } from '@prairielearn/logger';
+import { config } from '../../lib/config.js';
+
+const router = Router();
 
 router.get('/', function (req, res, next) {
   if (!config.hasCas || !config.casUrl || !config.casServiceUrl) {
@@ -39,5 +40,5 @@ router.get('/', function (req, res, next) {
   res.redirect(casurl);
 });
 
-module.exports = router;
+export default router;
 // @russfeld end

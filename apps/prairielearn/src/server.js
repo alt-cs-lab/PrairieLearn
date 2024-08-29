@@ -518,8 +518,8 @@ export async function initExpress() {
   );
 
   // @russfeld start
-  app.use('/pl/caslogin', require('./pages/authLoginCas/authLoginCas.js'));
-  app.use('/pl/cascallback', require('./pages/authCallbackCas/authCallbackCas.js'));
+  app.use('/pl/caslogin', (await import('./pages/authLoginCas/authLoginCas.js')).default);
+  app.use('/pl/cascallback',(await import('./pages/authCallbackCas/authCallbackCas.js')).default);
   // @russfeld end
 
   if (isEnterprise()) {
