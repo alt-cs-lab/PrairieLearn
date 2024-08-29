@@ -194,6 +194,10 @@ const SKIP_ROUTES = [
   '/pl/loadFromDisk',
   '/pl/oauth2callback',
   '/pl/oauth2login',
+  // @russfeld start
+  '/pl/caslogin',
+  '/pl/cascallback',
+  // @russfeld end
 
   // Admin page; we aren't guaranteed to have subpages to navigate to.
   '/pl/administrator/batchedMigrations/:batched_migration_id',

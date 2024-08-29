@@ -500,6 +500,11 @@ export async function initExpress() {
     (await import('./pages/authCallbackShib/authCallbackShib.js')).default,
   );
 
+  // @russfeld start
+  app.use('/pl/caslogin', (await import('./pages/authLoginCas/authLoginCas.js')).default);
+  app.use('/pl/cascallback',(await import('./pages/authCallbackCas/authCallbackCas.js')).default);
+  // @russfeld end
+
   if (isEnterprise()) {
     if (config.hasAzure) {
       app.use('/pl/azure_login', (await import('./ee/auth/azure/login.js')).default);
