@@ -125,7 +125,6 @@ router.get(
                     provider: 'CAS',
                   };
                   await authnLib.loadUser(req, res, authnParams, {
-                    pl_authn_cookie: true,
                     redirect: true,
                   });
                 }
