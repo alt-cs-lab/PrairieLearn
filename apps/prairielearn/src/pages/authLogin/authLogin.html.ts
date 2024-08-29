@@ -168,6 +168,16 @@ function GoogleLoginButton() {
   `;
 }
 
+// @russfeld start
+function CasLoginButton() {
+  return html`
+    <a class="btn btn-primary d-block position-relative" href="/pl/caslogin">
+      <span class="font-weight-bold">Sign in with CAS</span>
+    </a>
+  `;
+}
+// @russfeld end
+
 function MicrosoftLoginButton() {
   return html`
     <a class="btn btn-dark d-block position-relative" href="/pl/azure_login">
@@ -209,6 +219,7 @@ export function AuthLogin({
       <div class="login-methods mt-4">
         ${config.hasShib && !config.hideShibLogin ? ShibLoginButton() : ''}
         ${config.hasOauth ? GoogleLoginButton() : ''}
+        ${config.hasCas ? CasLoginButton() : ''}
         ${config.hasAzure && isEnterprise() ? MicrosoftLoginButton() : ''}
       </div>
       ${institutionAuthnProviders?.length
