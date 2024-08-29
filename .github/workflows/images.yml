@@ -60,7 +60,7 @@ jobs:
           no-cache: true
           # @russfeld start
           # tags: prairielearn/prairielearn:latest,prairielearn/prairielearn:${{ github.sha }}
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ghcr.io/alt-cs-lab/prairielearn:latest
           # @russfeld end
 
       ######################################################################################################
